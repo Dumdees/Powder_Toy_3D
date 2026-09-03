@@ -30,6 +30,22 @@ const PHYSICS = {
   drag: 0.02,
   restitution: 0.12,
   wallFriction: 0.88,
+  // Which faces of the box are there at all. An open face is left as air, so the pressure
+  // solve reads it as a free surface and anything reaching it simply leaves.
+  walls: 'closed',        // see WALLS
+  boxMetres: 2.56,        // how big the whole sandbox is, across one side
+};
+
+/**
+ * The box, or the lack of one. There is no simulation outside the grid - it is a fixed
+ * lattice and there is nowhere else for the maths to happen - so "no box" means the walls
+ * stop turning things back rather than the world carrying on past them. Material that
+ * reaches an open face is gone, and its slot returns to the pool.
+ */
+const WALLS = {
+  closed:  { label: 'Closed box',       sides: 1, roof: 1, floor: 1 },
+  open:    { label: 'Open sides',       sides: 0, roof: 0, floor: 1 },
+  endless: { label: 'No box at all',    sides: 0, roof: 0, floor: 0 },
 };
 
 // A preset fixes the two things that need everything rebuilt - how many cells and how
@@ -37,21 +53,40 @@ const PHYSICS = {
 // sandbox climbs by itself once it has seen how fast the machine really is. Nothing
 // here is applied to a frame directly; see applyDetail() in 90-main.js.
 const QUALITY = {
-  low:    { grid: 48, particles: 1 << 16, detail: 2 },
-  medium: { grid: 64, particles: 1 << 17, detail: 4 },
-  high:   { grid: 64, particles: 1 << 18, detail: 5 },
-  ultra:  { grid: 80, particles: 1 << 18, detail: 6 },
+  low:      { grid: 48,  particles: 1 << 16, detail: 2 },
+  medium:   { grid: 64,  particles: 1 << 17, detail: 4 },
+  high:     { grid: 64,  particles: 1 << 18, detail: 5 },
+  ultra:    { grid: 80,  particles: 1 << 18, detail: 6 },
+  // Room rather than resolution. A preset counts cells, not metres - the sandbox is the
+  // same size across whichever is chosen, so these buy detail within it, and boxMetres
+  // decides how much world that detail is spread over. Work grows with the cube of the
+  // side, so 96 cells is about three and a half times the middle preset, 128 about eight.
+  huge:     { grid: 96,  particles: 1 << 18, detail: 6 },
+  enormous: { grid: 128, particles: 1 << 19, detail: 6 },
 };
 
 const COARSE_SCALE = 4;
 
+/** The three wall switches, as the shaders want them. */
+const wallUniforms = () => {
+  const w = WALLS[PHYSICS.walls] || WALLS.closed;
+  return { uWallSides: w.sides, uWallRoof: w.roof, uWallFloor: w.floor };
+};
+
 class Sim {
-  constructor(gfx, { grid = 64, particles = 1 << 17, boxMetres = 2.56 } = {}) {
+  /**
+   * How wide one cell is, in metres. Read rather than stored, so the sandbox can be made
+   * larger or smaller while it runs: every length the solver uses is scaled by this, and
+   * the scenes are laid out in cells, so they keep their proportions and simply cover
+   * more ground.
+   */
+  get dx() { return PHYSICS.boxMetres / this.n.nx; }
+  get boxMetres() { return PHYSICS.boxMetres; }
+
+  constructor(gfx, { grid = 64, particles = 1 << 17 } = {}) {
     this.gfx = gfx;
     const n = grid;
     this.n = atlasFor(n, n, n);
-    this.dx = boxMetres / n;
-    this.boxMetres = boxMetres;
 
     const cn = Math.ceil(n / COARSE_SCALE);
     this.coarseN = atlasFor(cn, cn, cn);
@@ -296,6 +331,7 @@ class Sim {
     g.pass(this.fbPrep, this.progPrep, {
       ...b, uMom: this.gMom, uHeat: this.gHeat, uGran: this.gGran,
       uDt: dt, uGravity: P.gravity, uAmbient: P.ambient, uDrag: P.drag,
+      ...wallUniforms(),
     });
     let vi = 0, ai = 0;
 
@@ -374,6 +410,7 @@ class Sim {
       uDt: dt, uGravity: P.gravity, uAmbient: P.ambient, uFlip: P.flip,
       uBuoyancy: P.buoyancy, uLatent: P.latent, uHeatCouple: P.heatCouple,
       uRestitution: P.restitution, uWallFriction: P.wallFriction, uPackLimit: P.packLimit, uSeparate: P.separate,
+      ...wallUniforms(),
       uGranular: P.granular, uPressFloor: P.pressFloor, uFricCap: P.fricCap, uCohesionAccel: P.cohesionAccel,
       uBrushOn: on, uBrushTool: on ? brush.tool : 0,
       uBrushPos: on ? brush.pos : [0, 0, 0],

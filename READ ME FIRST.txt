@@ -35,6 +35,28 @@ KEYS
 Hold Shift with Push to suck material in instead of blowing it out, and with
 Heat to chill instead of warm.
 
+MAKING IT BIGGER
+
+Two different things, under the settings (Tab):
+
+  Physics -> The box -> How big it is    the same cells spread over more ground,
+                                         so the world grows and detail coarsens.
+                                         Free; change it while it runs.
+  Quality -> Preset                      more cells. Huge and Enormous give real
+                                         room at full detail, and cost a lot more
+                                         to draw - Enormous is about eight times
+                                         the work of Medium.
+
+TAKING THE WALLS AWAY
+
+Physics -> The box -> Walls. "Open sides" keeps the floor but lets anything that
+reaches an edge pour away. "No box at all" takes the floor too, so everything
+falls for ever.
+
+Material that leaves is gone for good - there is no simulation outside the box to
+carry it on - which is exactly what pouring something off the edge of a table
+looks like, and it frees the speck up to be used again.
+
 IF IT RUNS SLOWLY
 
 It should already have sorted itself out. The sandbox opens deliberately small

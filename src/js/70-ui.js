@@ -89,6 +89,12 @@ function buildUI(ctx) {
     sceneButtons.set(s.id, b);
   }
 
+  const dirty = () => ctx.resetAccumulation();
+  const wallSel = el('select', { onchange: (e) => { PHYSICS.walls = e.target.value; dirty(); } },
+    Object.entries(WALLS).map(([k, w]) => el('option', { value: k, text: w.label })));
+  wallSel.value = PHYSICS.walls;
+  syncers.push(() => { wallSel.value = PHYSICS.walls; });
+
   // ---- physics
   $('page-physics').append(
     group('Forces', [
@@ -117,11 +123,20 @@ function buildUI(ctx) {
       slider(PHYSICS, 'restitution', { label: 'Bounce', min: 0, max: 0.7 }),
       slider(PHYSICS, 'wallFriction', { label: 'Wall grip', min: 0.4, max: 1 }),
     ]),
+    group('The box', [
+      el('div', { class: 'row' }, [el('label', { text: 'Walls' }), wallSel]),
+      slider(PHYSICS, 'boxMetres', {
+        label: 'How big it is', min: 0.5, max: 20, step: 0.1,
+        fmt: (v) => (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' m across',
+        onChange: () => { ctx.worldResized(); dirty(); },
+      }),
+      el('p', { class: 'note', text: 'Making it bigger spreads the same cells over more ground, '
+        + 'so everything is coarser. For more room at the same detail, pick a larger preset under Quality.' }),
+    ]),
     el('p', { class: 'note', text: 'Water is held incompressible by a pressure solve; grains yield by Coulomb friction; steam and smoke rise by the Boussinesq term.' }),
   );
 
   // ---- light
-  const dirty = () => ctx.resetAccumulation();
   $('page-light').append(
     group('Sun and sky', [
       slider(RENDER, 'sunElevation', { label: 'Sun height', min: 2, max: 88, step: 0.5, fmt: (v) => v.toFixed(0) + '°', onChange: dirty }),

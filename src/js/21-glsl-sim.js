@@ -83,6 +83,7 @@ void main() { oMom = vMom; oHeat = vHeat; oGran = vGran; }`;
 const GRID_PREP_FS = GLSL_HEAD + GLSL_COMMON + `
 uniform sampler2D uMom, uHeat, uGran;
 uniform float uDt, uGravity, uAmbient, uDrag;
+uniform float uWallSides, uWallRoof, uWallFloor;
 layout(location = 0) out vec4 oVel;     // velocity.xyz, density
 layout(location = 1) out vec4 oPre;     // velocity as transferred, fill fraction
 layout(location = 2) out vec4 oAux;     // solid, temperature, viscosity, fill
@@ -110,7 +111,15 @@ void main() {
   // A cell is solid when it is mostly fixed material, or part of the box itself.
   float solid = (m > 1e-5 && H.x * inv > 0.5) ? 1.0 : 0.0;
   ivec3 n = gridSize();
-  if (c.x < 1 || c.y < 1 || c.z < 1 || c.x >= n.x - 1 || c.y >= n.y - 1 || c.z >= n.z - 1) solid = 1.0;
+  // The shell around the grid. Closed, it is solid and everything bounces off it. Opened,
+  // it is simply left as air, and that is the whole trick: an empty cell contributes no
+  // pressure term, so the solve already treats it as a free surface and material flows
+  // out as though nothing were there. The floor is a separate switch, because pouring
+  // things off the edge of a table is a different wish from having no floor at all.
+  bool side = c.x < 1 || c.z < 1 || c.x >= n.x - 1 || c.z >= n.z - 1;
+  if (side && uWallSides > 0.5) solid = 1.0;
+  if (c.y >= n.y - 1 && uWallRoof > 0.5) solid = 1.0;
+  if (c.y < 1 && uWallFloor > 0.5) solid = 1.0;
 
   oPre = vec4(v, G.x);
 

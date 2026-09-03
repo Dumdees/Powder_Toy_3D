@@ -16,6 +16,7 @@ uniform sampler2D uPos, uVel, uAux;
 uniform sampler2D uGVel, uGPre, uGAux, uGPress;
 uniform float uDt, uDx, uGravity, uAmbient, uFlip, uBuoyancy, uLatent, uHeatCouple;
 uniform float uRestitution, uWallFriction, uPackLimit, uSeparate;
+uniform float uWallSides, uWallRoof, uWallFloor;
 uniform float uGranular, uPressFloor, uFricCap, uCohesionAccel;
 uniform vec3 uBrushPos, uBrushVel;
 uniform float uBrushRadius, uBrushStrength;
@@ -119,13 +120,25 @@ void main() {
     // ---- the walls of the box. The margin keeps a speck's whole splat stencil
     // inside the fluid cells; any closer and half its mass lands in the wall and
     // is thrown away, which the solver reads as the box being emptier than it is.
+    //
+    // A face that is not walled lets a speck go instead of turning it round. It is not
+    // carried on outside - there is no grid out there to carry it in - it is simply gone,
+    // and its slot goes back to the pool. Which is what falling off the edge looks like.
     vec3 lo = vec3(1.55), hi = uGrid - 1.55;
-    if (p.x < lo.x) { p.x = lo.x; v.x = max(v.x, -v.x * uRestitution); v *= uWallFriction; }
-    if (p.x > hi.x) { p.x = hi.x; v.x = min(v.x, -v.x * uRestitution); v *= uWallFriction; }
-    if (p.y < lo.y) { p.y = lo.y; v.y = max(v.y, -v.y * uRestitution); v *= uWallFriction; }
-    if (p.y > hi.y) { p.y = hi.y; v.y = min(v.y, -v.y * uRestitution); v *= uWallFriction; }
-    if (p.z < lo.z) { p.z = lo.z; v.z = max(v.z, -v.z * uRestitution); v *= uWallFriction; }
-    if (p.z > hi.z) { p.z = hi.z; v.z = min(v.z, -v.z * uRestitution); v *= uWallFriction; }
+    bool gone = false;
+    if (uWallSides > 0.5) {
+      if (p.x < lo.x) { p.x = lo.x; v.x = max(v.x, -v.x * uRestitution); v *= uWallFriction; }
+      if (p.x > hi.x) { p.x = hi.x; v.x = min(v.x, -v.x * uRestitution); v *= uWallFriction; }
+      if (p.z < lo.z) { p.z = lo.z; v.z = max(v.z, -v.z * uRestitution); v *= uWallFriction; }
+      if (p.z > hi.z) { p.z = hi.z; v.z = min(v.z, -v.z * uRestitution); v *= uWallFriction; }
+    } else if (p.x < lo.x || p.x > hi.x || p.z < lo.z || p.z > hi.z) gone = true;
+    if (uWallFloor > 0.5) {
+      if (p.y < lo.y) { p.y = lo.y; v.y = max(v.y, -v.y * uRestitution); v *= uWallFriction; }
+    } else if (p.y < lo.y) gone = true;
+    if (uWallRoof > 0.5) {
+      if (p.y > hi.y) { p.y = hi.y; v.y = min(v.y, -v.y * uRestitution); v *= uWallFriction; }
+    } else if (p.y > hi.y) gone = true;
+    if (gone) { oPos = vec4(p, 0.0); oVel = vec4(0.0); oAux = vec4(0.0); return; }
 
     // ---- anything fixed in the way, and anywhere too many specks have piled up
     vec2 here = fieldAt(p);
@@ -154,6 +167,8 @@ void main() {
       // heap instead of quietly relieving the crowding.
       if (gl > 1e-4) p -= (gd / gl) * min(over, 1.0) * uSeparate * uDt;
     }
+    // Only the crowding nudge is being kept in bounds here; anything that had really
+    // left was dealt with above, and clamping it back would undo that.
     p = clamp(p, vec3(1.55), uGrid - 1.55);
   }
 

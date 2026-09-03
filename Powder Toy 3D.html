@@ -1370,6 +1370,7 @@ void main() { oMom = vMom; oHeat = vHeat; oGran = vGran; }`;
 const GRID_PREP_FS = GLSL_HEAD + GLSL_COMMON + `
 uniform sampler2D uMom, uHeat, uGran;
 uniform float uDt, uGravity, uAmbient, uDrag;
+uniform float uWallSides, uWallRoof, uWallFloor;
 layout(location = 0) out vec4 oVel;     // velocity.xyz, density
 layout(location = 1) out vec4 oPre;     // velocity as transferred, fill fraction
 layout(location = 2) out vec4 oAux;     // solid, temperature, viscosity, fill
@@ -1397,7 +1398,15 @@ void main() {
   // A cell is solid when it is mostly fixed material, or part of the box itself.
   float solid = (m > 1e-5 && H.x * inv > 0.5) ? 1.0 : 0.0;
   ivec3 n = gridSize();
-  if (c.x < 1 || c.y < 1 || c.z < 1 || c.x >= n.x - 1 || c.y >= n.y - 1 || c.z >= n.z - 1) solid = 1.0;
+  // The shell around the grid. Closed, it is solid and everything bounces off it. Opened,
+  // it is simply left as air, and that is the whole trick: an empty cell contributes no
+  // pressure term, so the solve already treats it as a free surface and material flows
+  // out as though nothing were there. The floor is a separate switch, because pouring
+  // things off the edge of a table is a different wish from having no floor at all.
+  bool side = c.x < 1 || c.z < 1 || c.x >= n.x - 1 || c.z >= n.z - 1;
+  if (side && uWallSides > 0.5) solid = 1.0;
+  if (c.y >= n.y - 1 && uWallRoof > 0.5) solid = 1.0;
+  if (c.y < 1 && uWallFloor > 0.5) solid = 1.0;
 
   oPre = vec4(v, G.x);
 
@@ -1690,6 +1699,7 @@ uniform sampler2D uPos, uVel, uAux;
 uniform sampler2D uGVel, uGPre, uGAux, uGPress;
 uniform float uDt, uDx, uGravity, uAmbient, uFlip, uBuoyancy, uLatent, uHeatCouple;
 uniform float uRestitution, uWallFriction, uPackLimit, uSeparate;
+uniform float uWallSides, uWallRoof, uWallFloor;
 uniform float uGranular, uPressFloor, uFricCap, uCohesionAccel;
 uniform vec3 uBrushPos, uBrushVel;
 uniform float uBrushRadius, uBrushStrength;
@@ -1793,13 +1803,25 @@ void main() {
     // ---- the walls of the box. The margin keeps a speck's whole splat stencil
     // inside the fluid cells; any closer and half its mass lands in the wall and
     // is thrown away, which the solver reads as the box being emptier than it is.
+    //
+    // A face that is not walled lets a speck go instead of turning it round. It is not
+    // carried on outside - there is no grid out there to carry it in - it is simply gone,
+    // and its slot goes back to the pool. Which is what falling off the edge looks like.
     vec3 lo = vec3(1.55), hi = uGrid - 1.55;
-    if (p.x < lo.x) { p.x = lo.x; v.x = max(v.x, -v.x * uRestitution); v *= uWallFriction; }
-    if (p.x > hi.x) { p.x = hi.x; v.x = min(v.x, -v.x * uRestitution); v *= uWallFriction; }
-    if (p.y < lo.y) { p.y = lo.y; v.y = max(v.y, -v.y * uRestitution); v *= uWallFriction; }
-    if (p.y > hi.y) { p.y = hi.y; v.y = min(v.y, -v.y * uRestitution); v *= uWallFriction; }
-    if (p.z < lo.z) { p.z = lo.z; v.z = max(v.z, -v.z * uRestitution); v *= uWallFriction; }
-    if (p.z > hi.z) { p.z = hi.z; v.z = min(v.z, -v.z * uRestitution); v *= uWallFriction; }
+    bool gone = false;
+    if (uWallSides > 0.5) {
+      if (p.x < lo.x) { p.x = lo.x; v.x = max(v.x, -v.x * uRestitution); v *= uWallFriction; }
+      if (p.x > hi.x) { p.x = hi.x; v.x = min(v.x, -v.x * uRestitution); v *= uWallFriction; }
+      if (p.z < lo.z) { p.z = lo.z; v.z = max(v.z, -v.z * uRestitution); v *= uWallFriction; }
+      if (p.z > hi.z) { p.z = hi.z; v.z = min(v.z, -v.z * uRestitution); v *= uWallFriction; }
+    } else if (p.x < lo.x || p.x > hi.x || p.z < lo.z || p.z > hi.z) gone = true;
+    if (uWallFloor > 0.5) {
+      if (p.y < lo.y) { p.y = lo.y; v.y = max(v.y, -v.y * uRestitution); v *= uWallFriction; }
+    } else if (p.y < lo.y) gone = true;
+    if (uWallRoof > 0.5) {
+      if (p.y > hi.y) { p.y = hi.y; v.y = min(v.y, -v.y * uRestitution); v *= uWallFriction; }
+    } else if (p.y > hi.y) gone = true;
+    if (gone) { oPos = vec4(p, 0.0); oVel = vec4(0.0); oAux = vec4(0.0); return; }
 
     // ---- anything fixed in the way, and anywhere too many specks have piled up
     vec2 here = fieldAt(p);
@@ -1828,6 +1850,8 @@ void main() {
       // heap instead of quietly relieving the crowding.
       if (gl > 1e-4) p -= (gd / gl) * min(over, 1.0) * uSeparate * uDt;
     }
+    // Only the crowding nudge is being kept in bounds here; anything that had really
+    // left was dealt with above, and clamping it back would undo that.
     p = clamp(p, vec3(1.55), uGrid - 1.55);
   }
 
@@ -2684,21 +2708,47 @@ const PHYSICS = {
   drag: 0.02,
   restitution: 0.12,
   wallFriction: 0.88,
+  walls: 'closed',        // see WALLS
+  boxMetres: 2.56,        // how big the whole sandbox is, across one side
+};
+/**
+ * The box, or the lack of one. There is no simulation outside the grid - it is a fixed
+ * lattice and there is nowhere else for the maths to happen - so "no box" means the walls
+ * stop turning things back rather than the world carrying on past them. Material that
+ * reaches an open face is gone, and its slot returns to the pool.
+ */
+const WALLS = {
+  closed:  { label: 'Closed box',       sides: 1, roof: 1, floor: 1 },
+  open:    { label: 'Open sides',       sides: 0, roof: 0, floor: 1 },
+  endless: { label: 'No box at all',    sides: 0, roof: 0, floor: 0 },
 };
 const QUALITY = {
-  low:    { grid: 48, particles: 1 << 16, detail: 2 },
-  medium: { grid: 64, particles: 1 << 17, detail: 4 },
-  high:   { grid: 64, particles: 1 << 18, detail: 5 },
-  ultra:  { grid: 80, particles: 1 << 18, detail: 6 },
+  low:      { grid: 48,  particles: 1 << 16, detail: 2 },
+  medium:   { grid: 64,  particles: 1 << 17, detail: 4 },
+  high:     { grid: 64,  particles: 1 << 18, detail: 5 },
+  ultra:    { grid: 80,  particles: 1 << 18, detail: 6 },
+  huge:     { grid: 96,  particles: 1 << 18, detail: 6 },
+  enormous: { grid: 128, particles: 1 << 19, detail: 6 },
 };
 const COARSE_SCALE = 4;
+/** The three wall switches, as the shaders want them. */
+const wallUniforms = () => {
+  const w = WALLS[PHYSICS.walls] || WALLS.closed;
+  return { uWallSides: w.sides, uWallRoof: w.roof, uWallFloor: w.floor };
+};
 class Sim {
-  constructor(gfx, { grid = 64, particles = 1 << 17, boxMetres = 2.56 } = {}) {
+  /**
+   * How wide one cell is, in metres. Read rather than stored, so the sandbox can be made
+   * larger or smaller while it runs: every length the solver uses is scaled by this, and
+   * the scenes are laid out in cells, so they keep their proportions and simply cover
+   * more ground.
+   */
+  get dx() { return PHYSICS.boxMetres / this.n.nx; }
+  get boxMetres() { return PHYSICS.boxMetres; }
+  constructor(gfx, { grid = 64, particles = 1 << 17 } = {}) {
     this.gfx = gfx;
     const n = grid;
     this.n = atlasFor(n, n, n);
-    this.dx = boxMetres / n;
-    this.boxMetres = boxMetres;
     const cn = Math.ceil(n / COARSE_SCALE);
     this.coarseN = atlasFor(cn, cn, cn);
     this.capacity = particles;
@@ -2916,6 +2966,7 @@ class Sim {
     g.pass(this.fbPrep, this.progPrep, {
       ...b, uMom: this.gMom, uHeat: this.gHeat, uGran: this.gGran,
       uDt: dt, uGravity: P.gravity, uAmbient: P.ambient, uDrag: P.drag,
+      ...wallUniforms(),
     });
     let vi = 0, ai = 0;
     for (let i = 0; i < 2; i++) {
@@ -2981,6 +3032,7 @@ class Sim {
       uDt: dt, uGravity: P.gravity, uAmbient: P.ambient, uFlip: P.flip,
       uBuoyancy: P.buoyancy, uLatent: P.latent, uHeatCouple: P.heatCouple,
       uRestitution: P.restitution, uWallFriction: P.wallFriction, uPackLimit: P.packLimit, uSeparate: P.separate,
+      ...wallUniforms(),
       uGranular: P.granular, uPressFloor: P.pressFloor, uFricCap: P.fricCap, uCohesionAccel: P.cohesionAccel,
       uBrushOn: on, uBrushTool: on ? brush.tool : 0,
       uBrushPos: on ? brush.pos : [0, 0, 0],
@@ -3606,6 +3658,11 @@ function buildUI(ctx) {
     scenes.appendChild(b);
     sceneButtons.set(s.id, b);
   }
+  const dirty = () => ctx.resetAccumulation();
+  const wallSel = el('select', { onchange: (e) => { PHYSICS.walls = e.target.value; dirty(); } },
+    Object.entries(WALLS).map(([k, w]) => el('option', { value: k, text: w.label })));
+  wallSel.value = PHYSICS.walls;
+  syncers.push(() => { wallSel.value = PHYSICS.walls; });
   $('page-physics').append(
     group('Forces', [
       slider(PHYSICS, 'gravity', { label: 'Gravity', min: 0, max: 25, step: 0.1, fmt: (v) => v.toFixed(1) + ' m/s²' }),
@@ -3633,9 +3690,18 @@ function buildUI(ctx) {
       slider(PHYSICS, 'restitution', { label: 'Bounce', min: 0, max: 0.7 }),
       slider(PHYSICS, 'wallFriction', { label: 'Wall grip', min: 0.4, max: 1 }),
     ]),
+    group('The box', [
+      el('div', { class: 'row' }, [el('label', { text: 'Walls' }), wallSel]),
+      slider(PHYSICS, 'boxMetres', {
+        label: 'How big it is', min: 0.5, max: 20, step: 0.1,
+        fmt: (v) => (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' m across',
+        onChange: () => { ctx.worldResized(); dirty(); },
+      }),
+      el('p', { class: 'note', text: 'Making it bigger spreads the same cells over more ground, '
+        + 'so everything is coarser. For more room at the same detail, pick a larger preset under Quality.' }),
+    ]),
     el('p', { class: 'note', text: 'Water is held incompressible by a pressure solve; grains yield by Coulomb friction; steam and smoke rise by the Boussinesq term.' }),
   );
-  const dirty = () => ctx.resetAccumulation();
   $('page-light').append(
     group('Sun and sky', [
       slider(RENDER, 'sunElevation', { label: 'Sun height', min: 2, max: 88, step: 0.5, fmt: (v) => v.toFixed(0) + '°', onChange: dirty }),
@@ -3944,7 +4010,7 @@ async function start() {
     loadScene(APP.sceneId, true);
     if (ui) {
       ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
-        + `up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
+        + `${sim.boxMetres.toFixed(1)} m across · up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
     }
     progressDone();
   };
@@ -4051,6 +4117,18 @@ async function start() {
     setDetailRung(r) { applyDetail(r); },
     feedFrameTime(ms) { perf.settle = 0; govern(ms); },
     resetAccumulation() { renderer.reset(); },
+    /**
+     * The sandbox has been made bigger or smaller. Nothing needs rebuilding - every
+     * length the solver uses is scaled from the cell size, which is now read live - but
+     * the camera framed the old size, so it is pulled back to suit, and the readout
+     * still quotes the old cell size until it is asked again.
+     */
+    worldResized() {
+      cam.setGrid([sim.n.nx, sim.n.ny, sim.n.nz]);
+      renderer.reset();
+      if (ui) ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
+        + `${sim.boxMetres.toFixed(1)} m across · up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
+    },
     togglePlay() { APP.playing = !APP.playing; ui.playing(APP.playing); renderer.reset(); },
     stepOnce() { APP.stepOnce = true; APP.playing = false; ui.playing(false); },
     empty() { sim.clear(); renderer.reset(); },

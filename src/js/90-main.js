@@ -234,7 +234,7 @@ async function start() {
     loadScene(APP.sceneId, true);
     if (ui) {
       ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
-        + `up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
+        + `${sim.boxMetres.toFixed(1)} m across · up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
     }
     // Whoever asked for the rebuild, there is something to look at now. Without this a
     // rebuild from the frame loop leaves its own progress message covering the sandbox.
@@ -359,6 +359,18 @@ async function start() {
     setDetailRung(r) { applyDetail(r); },
     feedFrameTime(ms) { perf.settle = 0; govern(ms); },
     resetAccumulation() { renderer.reset(); },
+    /**
+     * The sandbox has been made bigger or smaller. Nothing needs rebuilding - every
+     * length the solver uses is scaled from the cell size, which is now read live - but
+     * the camera framed the old size, so it is pulled back to suit, and the readout
+     * still quotes the old cell size until it is asked again.
+     */
+    worldResized() {
+      cam.setGrid([sim.n.nx, sim.n.ny, sim.n.nz]);
+      renderer.reset();
+      if (ui) ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
+        + `${sim.boxMetres.toFixed(1)} m across · up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
+    },
     togglePlay() { APP.playing = !APP.playing; ui.playing(APP.playing); renderer.reset(); },
     stepOnce() { APP.stepOnce = true; APP.playing = false; ui.playing(false); },
     empty() { sim.clear(); renderer.reset(); },

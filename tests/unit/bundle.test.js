@@ -169,7 +169,9 @@ test('the ladder only ever goes up, and every preset can reach a rung', async ()
   assert.ok(rungs[0] <= 0.35, 'the first frame is drawn too large to be a safe opening bid');
   const presets = sim.slice(sim.indexOf('const QUALITY = {'), sim.indexOf('};', sim.indexOf('const QUALITY = {')));
   const ceilings = [...presets.matchAll(/detail: (\d+)/g)].map((m) => Number(m[1]));
-  assert.equal(ceilings.length, 4, 'every preset needs a detail ceiling');
+  const presetCount = (presets.match(/grid:/g) || []).length;
+  assert.equal(ceilings.length, presetCount, 'every preset needs a detail ceiling');
+  assert.ok(presetCount >= 4, 'the presets have gone missing');
   for (const c of ceilings) assert.ok(c >= 0 && c < rungs.length, `ceiling ${c} is not a rung`);
 });
 

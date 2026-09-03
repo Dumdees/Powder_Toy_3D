@@ -139,6 +139,22 @@ scripts/windows-package.mjs builds the program, smoke-tests it, builds the insta
 objects (`PHYSICS`, `RENDER`, `QUALITY`, `DETAIL`), the live `sim` and `renderer`, and
 `advance(n)` / `drawOnce()` so the physics can be stepped without drawing.
 
+### How big the world is, and whether it has walls
+
+`boxMetres` is the width of the whole sandbox and `dx` is read from it live, so the
+world can be resized while it runs: every length the solver uses is scaled by the cell
+size, and the scenes are laid out in cells, so they keep their proportions and simply
+cover more ground. A quality preset counts cells, not metres - it buys detail within
+whatever size is set, and `huge` and `enormous` (96 and 128 a side) buy room at full
+detail for roughly three and a half and eight times the work.
+
+`PHYSICS.walls` picks which faces of the box exist. The trick is that an open face is
+not special-cased anywhere in the solve: it is simply left as air, and an empty cell
+already contributes no pressure term, so the existing solve reads it as a free surface
+and material flows out through it. G2P then lets a speck past that face go rather than
+turning it round, and its slot returns to the pool. There is no simulation outside the
+grid and there cannot be - it is a fixed lattice - so leaving means gone.
+
 ### Fitting the machine
 
 A graphics card that is asked for a frame it cannot finish quickly enough gets reset
