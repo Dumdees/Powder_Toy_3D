@@ -76,11 +76,22 @@ if (has('--smoke-test')) {
   //    file parsing, WebView2 loading, all 28 shaders compiling and a frame being drawn.
   const exe = path.join(dist, `${APP}.exe`);
   if (!existsSync(exe)) { console.error('Program not built:', exe); process.exit(1); }
-  const r = spawnSync(exe, ['--smoke-test'], { stdio: 'inherit', timeout: 480000 });
   const note = path.join(process.env.LOCALAPPDATA || os.homedir(), APP, 'Data', 'smoke-test.txt');
-  const status = existsSync(note) ? readFileSync(note, 'utf8').trim() : '(no note written)';
-  console.log('Smoke test exit code:', r.status);
-  console.log('Smoke test says:', status);
+  // Two attempts, because the failure this guards against is not always the program's fault.
+  // A build runner draws with a software rasteriser, and one has already refused an off-screen
+  // buffer on a build whose identical step had passed minutes earlier - so a single red run
+  // cannot tell a broken package from a rasteriser having a bad day. A second run can: a real
+  // break fails the same way twice, and both attempts are printed so nothing is swept away.
+  let r = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    rmSync(note, { force: true }); // so a stale note cannot be read as this attempt's result
+    r = spawnSync(exe, ['--smoke-test'], { stdio: 'inherit', timeout: 480000 });
+    const status = existsSync(note) ? readFileSync(note, 'utf8').trim() : '(no note written)';
+    console.log(`Smoke test attempt ${attempt} exit code:`, r.status);
+    console.log(`Smoke test attempt ${attempt} says:`, status);
+    if (r.status === 0) break;
+    if (attempt === 1) console.log('Trying once more before calling it a failure.');
+  }
   if (r.status !== 0) process.exit(r.status || 1);
 }
 
