@@ -45,7 +45,7 @@ uniform vec2 uCTiles, uCAtlas;
 uniform float uCoarseScale;
 uniform float uIso, uDx, uClarity, uShadowSigma, uGasSigma, uGlowGain, uFloorY;
 uniform int uDoShadows, uDoReflect, uDoRefract, uDoCaustics, uDoGas;
-uniform int uSurfSteps, uShadowSteps, uVolSteps;
+uniform int uSurfSteps, uShadowSteps, uVolSteps, uBounces;
 uniform float uSurfStep;
 uniform uint uFrameSeed;
 
@@ -308,7 +308,9 @@ vec3 traceRefraction(vec3 p, vec3 n, vec3 rd, Surf s) {
   if (dot(dir, dir) < 1e-6) dir = reflect(rd, n);
   vec3 pos = p + dir * 0.6;
   vec3 atten = vec3(1.0);
-  for (int bounce = 0; bounce < 3; bounce++) {
+  // Dynamic, like the marches, and for the same reason: a constant here means three
+  // unrolled copies of everything below it, each holding a ray march of its own.
+  for (int bounce = 0; bounce < uBounces; bounce++) {
     float far = boxRange(pos, dir, boxLo(), boxHi()).y;
     float d = 0.0;
     bool left = false;
@@ -510,7 +512,10 @@ void main() {
   float t = max(br.x, 0.0);
   vec3 energy = vec3(1.0);
 
-  for (int seg = 0; seg < 4; seg++) {
+  // The heaviest shader here by a distance: each pass round this loop runs a full
+  // surface march and another through the medium. Left as a constant, a compiler makes
+  // four copies of all of it before it starts.
+  for (int seg = 0; seg < uBounces + 1; seg++) {
     Hit hit = marchSurface(ro, rd, t + 0.01, br.y);
     if (!hit.hit) { oDrop = vec4(0.0); return; }
     vec3 p = ro + rd * hit.t;

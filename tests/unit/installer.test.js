@@ -177,6 +177,18 @@ test('the smoke test goes the way a real machine does, not only the software way
     'the no-graphics-card fallback is shipped, so it has to be tested too');
 });
 
+test('a startup still in progress is not reported as a failure', async () => {
+  // The boot panel carries two different things: "still starting" and "cannot start".
+  // The smoke test treated any visible panel as fatal, so the moment the page began
+  // saying what it was doing, every build failed - a self-inflicted red that looked
+  // exactly like the crash being chased.
+  assert.match(mainForm, /boot\.dataset\.mode === 'progress'/,
+    'the smoke test cannot tell a starting sandbox from a broken one');
+  const main = await read('src/js/90-main.js');
+  assert.match(main, /box\.dataset\.mode = 'progress'/, 'progress does not mark itself as such');
+  assert.match(main, /box\.dataset\.mode = 'fatal'/, 'a real failure does not mark itself as such');
+});
+
 test('a startup that stalls says so where it can still be seen', async () => {
   // If setting up the graphics goes badly the page has drawn nothing at all, so the
   // window title is the only thing left. The page writes its progress there and the

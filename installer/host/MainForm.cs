@@ -241,7 +241,13 @@ namespace PowderToy3D
 (function () {
   try {
     var boot = document.getElementById('boot');
-    if (boot && !boot.hidden) return 'fail:cannot-start ' + (boot.textContent || '').slice(0, 300);
+    /* The same panel carries both 'still starting' and 'cannot start', so the mode has to
+       be read too - otherwise a perfectly healthy startup is reported as a failure the
+       moment it says what it is doing. */
+    if (boot && !boot.hidden) {
+      if (boot.dataset.mode === 'progress') return 'waiting ' + (boot.textContent || '').slice(0, 120);
+      return 'fail:cannot-start ' + (boot.textContent || '').slice(0, 300);
+    }
     var P = window.PowderToy;
     if (!P || !P.sim || !P.renderer) return 'waiting';
     P.app.halt = true;                 /* stop the loop so the build machine is not pegged */
