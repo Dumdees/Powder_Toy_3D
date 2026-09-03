@@ -144,6 +144,20 @@ function start() {
     togglePanel() { APP.panelOpen = !APP.panelOpen; ui.panel(APP.panelOpen); },
     toggleHelp() { APP.helpOpen = !APP.helpOpen; ui.help(APP.helpOpen); },
     closeHelp() { APP.helpOpen = false; ui.help(false); },
+    /**
+     * Standard Fullscreen API, which works in a browser and is also what the Windows
+     * program watches for so it can drop its own window border to match.
+     */
+    toggleFullscreen() {
+      try {
+        if (document.fullscreenElement) {
+          if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        } else {
+          const el = document.documentElement;
+          if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+        }
+      } catch { /* some browsers refuse without a gesture; nothing to recover */ }
+    },
     cursor(uv) { APP.cursor = uv; brush.show = true; },
     brushDown() { renderer.reset(); },
   };

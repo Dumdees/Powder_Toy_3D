@@ -117,6 +117,9 @@ function attachInput(canvas, cam, hooks) {
     else if (k === 'h') hooks.toggleHelp();
     else if (k === 'tab') { e.preventDefault(); hooks.togglePanel(); }
     else if (k === 'backspace') { e.preventDefault(); hooks.empty(); }
+    // Ask for full screen ourselves rather than letting the browser do it, so the
+    // installed Windows program can follow along and drop its window border too.
+    else if (k === 'f11') { e.preventDefault(); hooks.toggleFullscreen(); }
     else if (k === 'escape') hooks.closeHelp();
   });
   addEventListener('keyup', (e) => { brush.shift = e.shiftKey; });

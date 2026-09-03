@@ -61,6 +61,37 @@ test('the installer ships the folder the packaging script assembles', async () =
   assert.match(script, /\[`\$\{APP\}\.html`, 'READ ME FIRST\.txt'\]/);
 });
 
+test('the page and the window agree on how full screen is asked for', async () => {
+  // These two have to meet in the middle, and the C# compiler cannot tell you when they
+  // do not: a WinForms host cannot see accelerator keys pressed inside the web content,
+  // so the page asks via the Fullscreen API and the window follows the resulting event.
+  const main = await read('src/js/90-main.js');
+  const input = await read('src/js/60-input.js');
+  assert.match(input, /k === 'f11'/, 'nothing in the page reacts to F11');
+  assert.match(main, /requestFullscreen/, 'the page never asks to go full screen');
+  assert.match(mainForm, /ContainsFullScreenElementChanged/,
+    'the window is not listening for the page going full screen');
+  // Usage, not mention: the host comment explains this trap by name, and should keep doing so.
+  assert.ok(!/\+=\s*\w*AcceleratorKey|CoreWebView2AcceleratorKeyPressedEventArgs/.test(mainForm),
+    'AcceleratorKeyPressed lives on CoreWebView2Controller, which the WinForms wrapper does not '
+    + 'expose - it compiles nowhere, and only fails once the Windows runner gets to it');
+});
+
+test('the host only subscribes to events that exist on CoreWebView2', () => {
+  // A spelling check against the .NET surface. Anything not on this list is either a typo
+  // or lives on another class; either way it costs a five-minute Windows build to find out.
+  const known = new Set([
+    'NavigationStarting', 'NavigationCompleted', 'NewWindowRequested', 'ProcessFailed',
+    'DocumentTitleChanged', 'ContainsFullScreenElementChanged', 'WebMessageReceived',
+    'PermissionRequested', 'SourceChanged', 'HistoryChanged', 'ContentLoading',
+    'DOMContentLoaded', 'WebResourceRequested', 'WindowCloseRequested', 'ScriptDialogOpening',
+    'FrameNavigationStarting', 'FrameNavigationCompleted', 'DownloadStarting',
+  ]);
+  const used = [...mainForm.matchAll(/\bcore\.(\w+)\s*\+=/g)].map((m) => m[1]);
+  assert.ok(used.length > 0, 'the host subscribes to no WebView2 events at all');
+  for (const name of used) assert.ok(known.has(name), `core.${name} is not an event on CoreWebView2`);
+});
+
 test('nothing here asks for administrator rights', async () => {
   assert.match(iss, /PrivilegesRequired=lowest/);
   assert.match(iss, /DefaultDirName=\{localappdata\}/, 'a per-user install must not write to Program Files');

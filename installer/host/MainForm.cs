@@ -15,7 +15,6 @@ namespace PowderToy3D
     {
         private const string AppFileName = "Powder Toy 3D.html";
         private const string VirtualHost = "powder-toy-3d.app";
-        private const uint VkF11 = 0x7A;
 
         private readonly WebView2 _web = new WebView2 { Dock = DockStyle.Fill };
         private readonly bool _smoke;
@@ -89,7 +88,7 @@ namespace PowderToy3D
                         OpenExternally(a.Uri);
                     }
                 };
-                core.AcceleratorKeyPressed += OnAcceleratorKey;
+                core.ContainsFullScreenElementChanged += OnFullScreenElementChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.ProcessFailed += (o, a) => Fail(5, "Sorry - the sandbox stopped unexpectedly. Please open it again.");
                 core.Navigate("https://" + VirtualHost + "/" + Uri.EscapeDataString(AppFileName));
@@ -115,17 +114,22 @@ namespace PowderToy3D
             }
         }
 
-        /// <summary>F11 toggles a borderless full-screen window; WebView2 sees the key first.</summary>
-        private void OnAcceleratorKey(object sender, CoreWebView2AcceleratorKeyPressedEventArgs e)
+        /// <summary>
+        /// The page has asked to go full screen, or to come back out of it - F11 in the sandbox
+        /// calls requestFullscreen(). A WinForms host cannot see accelerator keys pressed inside
+        /// the web content (AcceleratorKeyPressed lives on the controller, which the WinForms
+        /// wrapper keeps to itself), so the page drives this and the window follows. It also means
+        /// F11 behaves the same whether the file is opened in a browser or in this program.
+        /// </summary>
+        private void OnFullScreenElementChanged(object sender, object e)
         {
-            if (e.KeyEventKind != CoreWebView2KeyEventKind.KeyDown || e.VirtualKey != VkF11) return;
-            e.Handled = true;
-            BeginInvoke((MethodInvoker)ToggleFullScreen);
+            bool wanted = _web.CoreWebView2 != null && _web.CoreWebView2.ContainsFullScreenElement;
+            if (wanted != _fullScreen) SetFullScreen(wanted);
         }
 
-        private void ToggleFullScreen()
+        private void SetFullScreen(bool on)
         {
-            if (!_fullScreen)
+            if (on)
             {
                 _preFullState = WindowState;
                 _preFullBorder = FormBorderStyle;

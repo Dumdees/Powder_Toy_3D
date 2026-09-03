@@ -304,6 +304,7 @@ select {
             <dt>.</dt><dd>Advance a single frame</dd>
             <dt>[ ]</dt><dd>Brush smaller / larger</dd>
             <dt>Backspace</dt><dd>Empty the box</dd>
+            <dt>F11</dt><dd>Full screen</dd>
             <dt>Tab</dt><dd>Show or hide the settings</dd>
             <dt>H</dt><dd>Show or hide this card</dd>
           </dl>
@@ -3435,6 +3436,7 @@ function attachInput(canvas, cam, hooks) {
     else if (k === 'h') hooks.toggleHelp();
     else if (k === 'tab') { e.preventDefault(); hooks.togglePanel(); }
     else if (k === 'backspace') { e.preventDefault(); hooks.empty(); }
+    else if (k === 'f11') { e.preventDefault(); hooks.toggleFullscreen(); }
     else if (k === 'escape') hooks.closeHelp();
   });
   addEventListener('keyup', (e) => { brush.shift = e.shiftKey; });
@@ -3773,6 +3775,20 @@ function start() {
     togglePanel() { APP.panelOpen = !APP.panelOpen; ui.panel(APP.panelOpen); },
     toggleHelp() { APP.helpOpen = !APP.helpOpen; ui.help(APP.helpOpen); },
     closeHelp() { APP.helpOpen = false; ui.help(false); },
+    /**
+     * Standard Fullscreen API, which works in a browser and is also what the Windows
+     * program watches for so it can drop its own window border to match.
+     */
+    toggleFullscreen() {
+      try {
+        if (document.fullscreenElement) {
+          if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        } else {
+          const el = document.documentElement;
+          if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+        }
+      } catch { /* some browsers refuse without a gesture; nothing to recover */ }
+    },
     cursor(uv) { APP.cursor = uv; brush.show = true; },
     brushDown() { renderer.reset(); },
   };

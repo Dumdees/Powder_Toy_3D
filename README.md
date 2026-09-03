@@ -39,6 +39,7 @@ including the graphics built into most laptops. If it will not start, the page s
 | **Q W E R T** | Draw, Erase, Drag, Push, Heat |
 | **Space** | Pause or resume · **.** one frame · **Backspace** empty the box |
 | **[** and **]** | Brush smaller or larger · **Tab** settings · **H** help |
+| **F11** | Full screen |
 
 Hold **Shift** with Push to suck material in instead of blowing it out, and with
 Heat to chill instead of warm.
