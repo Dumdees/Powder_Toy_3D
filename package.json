@@ -1,0 +1,17 @@
+{
+  "name": "powder-toy-3d",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A physically based 3D powder toy: FLIP/APIC fluids, granular flow, heat and change of state, drawn with a ray-traced renderer. One self-contained HTML file.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/unit/*.test.js",
+    "test:browser": "node --test --test-concurrency=1 tests/browser/*.test.js",
+    "check": "npm test && npm run build && npm run test:browser",
+    "shots": "node scripts/shots.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

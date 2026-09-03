@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="application-name" content="Powder Toy 3D">
+<meta name="theme-color" content="#0b0f14">
+<title>Powder Toy 3D · a physics sandbox</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0f14'/%3E%3Ccircle cx='24' cy='27' r='11' fill='%2338bdf8'/%3E%3Ccircle cx='41' cy='38' r='9' fill='%23f97316'/%3E%3C/svg%3E">
+<style>
+<!--%CSS%-->
+</style>
+</head>
+<body>
+<noscript><div class="fatal"><h1>Powder Toy 3D</h1><p>This sandbox needs JavaScript switched on.</p></div></noscript>
+
+<canvas id="view" aria-label="3D physics sandbox"></canvas>
+
+<div id="boot" class="fatal" hidden></div>
+
+<div id="ui" hidden>
+
+  <header class="topbar" role="toolbar" aria-label="Simulation controls">
+    <div class="brand"><b>Powder Toy 3D</b><span>a physics sandbox</span></div>
+    <div class="spacer"></div>
+    <div class="transport">
+      <button id="btn-play" class="btn" title="Pause or resume (Space)"><span class="i-pause"></span><span class="lbl">Pause</span></button>
+      <button id="btn-step" class="btn" title="Advance one frame (.)"><span class="i-step"></span><span class="lbl">Step</span></button>
+      <button id="btn-clear" class="btn" title="Remove everything (Backspace)"><span class="i-clear"></span><span class="lbl">Empty</span></button>
+      <button id="btn-reset" class="btn" title="Reload the current scene"><span class="i-reset"></span><span class="lbl">Reset</span></button>
+    </div>
+    <div class="spacer"></div>
+    <div class="readout" id="readout" aria-live="off"></div>
+    <button id="btn-help" class="btn btn-ghost" title="Show the controls (H)">?</button>
+    <button id="btn-panel" class="btn btn-ghost" title="Show or hide the settings (Tab)">&#9776;</button>
+  </header>
+
+  <aside class="palette" aria-label="Materials">
+    <div class="palette-scroll" id="palette"></div>
+  </aside>
+
+  <section class="dock" aria-label="Tools">
+    <div class="tools" id="tools"></div>
+    <div class="brush">
+      <label for="brush-size">Brush</label>
+      <input id="brush-size" type="range" min="1" max="24" step="0.5" value="6">
+      <output id="brush-size-out">6</output>
+      <label for="brush-rate" class="wide">Flow</label>
+      <input id="brush-rate" type="range" min="0" max="100" step="1" value="55">
+      <output id="brush-rate-out">55</output>
+    </div>
+  </section>
+
+  <aside class="panel" id="panel" aria-label="Settings">
+    <nav class="tabs" id="panel-tabs">
+      <button class="tab is-on" data-tab="scenes">Scenes</button>
+      <button class="tab" data-tab="physics">Physics</button>
+      <button class="tab" data-tab="light">Light</button>
+      <button class="tab" data-tab="quality">Quality</button>
+    </nav>
+    <div class="panel-body">
+      <div class="tab-page is-on" data-page="scenes"><div class="scene-grid" id="scenes"></div>
+        <p class="note">Scenes rebuild the sandbox from scratch. Everything you have added is replaced.</p>
+      </div>
+      <div class="tab-page" data-page="physics" id="page-physics"></div>
+      <div class="tab-page" data-page="light" id="page-light"></div>
+      <div class="tab-page" data-page="quality" id="page-quality"></div>
+    </div>
+  </aside>
+
+  <div class="help" id="help" hidden>
+    <div class="help-card">
+      <button class="help-close btn btn-ghost" id="help-close" aria-label="Close">&times;</button>
+      <h2>How to play</h2>
+      <div class="help-cols">
+        <div>
+          <h3>Mouse</h3>
+          <dl>
+            <dt>Left drag</dt><dd>Use the current tool on whatever is under the pointer</dd>
+            <dt>Right drag</dt><dd>Orbit the camera</dd>
+            <dt>Middle drag</dt><dd>Slide the camera sideways</dd>
+            <dt>Wheel</dt><dd>Move closer or further away</dd>
+            <dt>Shift + wheel</dt><dd>Change the brush size</dd>
+            <dt>Ctrl + wheel</dt><dd>Push the brush deeper into the scene or pull it back</dd>
+          </dl>
+        </div>
+        <div>
+          <h3>Keys</h3>
+          <dl>
+            <dt>1 &ndash; 9, 0</dt><dd>Pick a material</dd>
+            <dt>Q W E R T</dt><dd>Pick a tool</dd>
+            <dt>Space</dt><dd>Pause or resume</dd>
+            <dt>.</dt><dd>Advance a single frame</dd>
+            <dt>[ ]</dt><dd>Brush smaller / larger</dd>
+            <dt>Backspace</dt><dd>Empty the box</dd>
+            <dt>Tab</dt><dd>Show or hide the settings</dd>
+            <dt>H</dt><dd>Show or hide this card</dd>
+          </dl>
+        </div>
+      </div>
+      <h3>What is going on underneath</h3>
+      <p id="help-physics"></p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+<!--%JS%-->
+</script>
+</body>
+</html>

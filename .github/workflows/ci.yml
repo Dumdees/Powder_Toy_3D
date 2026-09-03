@@ -1,0 +1,25 @@
+name: Check
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - run: npm test
+      - run: npm run build
+      - name: The single-file build is up to date
+        run: |
+          if ! git diff --quiet -- "Powder Toy 3D.html"; then
+            echo "The built file is out of date. Run 'npm run build' and commit the result."
+            exit 1
+          fi
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser

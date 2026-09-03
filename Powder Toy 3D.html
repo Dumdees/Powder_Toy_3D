@@ -1,0 +1,3878 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="application-name" content="Powder Toy 3D">
+<meta name="theme-color" content="#0b0f14">
+<title>Powder Toy 3D · a physics sandbox</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0f14'/%3E%3Ccircle cx='24' cy='27' r='11' fill='%2338bdf8'/%3E%3Ccircle cx='41' cy='38' r='9' fill='%23f97316'/%3E%3C/svg%3E">
+<style>
+
+:root {
+  --ink: #e8eef6;
+  --ink-dim: #93a4b8;
+  --glass: rgba(14, 20, 28, 0.78);
+  --glass-hi: rgba(30, 41, 55, 0.86);
+  --line: rgba(148, 176, 210, 0.18);
+  --accent: #38bdf8;
+  --accent-warm: #f97316;
+  --radius: 12px;
+  --pad: 10px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #05080c;
+  color: var(--ink);
+  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+#view.orbiting { cursor: grabbing; }
+.fatal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 40px;
+  text-align: center;
+  background: #05080c;
+  color: var(--ink);
+  z-index: 100;
+}
+.fatal h1 { margin: 0 0 4px; font-size: 22px; }
+.fatal p { margin: 0; max-width: 46ch; color: var(--ink-dim); }
+.fatal code { color: var(--accent); }
+#ui[hidden] { display: none; }
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--glass-hi);
+  color: var(--ink);
+  border-radius: 9px;
+  min-height: 34px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, transform .06s;
+  white-space: nowrap;
+}
+.btn:hover { background: rgba(56, 100, 140, 0.55); border-color: rgba(148, 200, 255, 0.4); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.is-on { background: var(--accent); border-color: var(--accent); color: #04202e; font-weight: 600; }
+.btn-ghost { background: transparent; min-width: 34px; justify-content: center; padding: 0 8px; }
+.btn .i-pause, .btn .i-step, .btn .i-clear, .btn .i-reset {
+  width: 11px; height: 11px; display: inline-block; background: currentColor;
+}
+.i-pause { clip-path: polygon(0 0, 38% 0, 38% 100%, 0 100%, 0 0, 62% 0, 100% 0, 100% 100%, 62% 100%, 62% 0); }
+.is-paused .i-pause { clip-path: polygon(6% 0, 100% 50%, 6% 100%); }
+.i-step { clip-path: polygon(0 0, 66% 50%, 0 100%, 0 0, 78% 0, 100% 0, 100% 100%, 78% 100%); }
+.i-clear { clip-path: polygon(50% 0, 100% 28%, 100% 100%, 0 100%, 0 28%); opacity: .8; }
+.i-reset { border-radius: 50%; clip-path: polygon(50% 0, 100% 0, 100% 100%, 0 100%, 0 40%, 50% 40%); }
+input[type=range] {
+  appearance: none;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+  min-width: 90px;
+}
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 3px; background: rgba(148, 176, 210, .28); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 3px; background: rgba(148, 176, 210, .28); }
+input[type=range]::-webkit-slider-thumb {
+  appearance: none; width: 15px; height: 15px; margin-top: -6px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #06121a; box-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+input[type=range]::-moz-range-thumb {
+  width: 13px; height: 13px; border-radius: 50%; background: var(--accent); border: 2px solid #06121a;
+}
+input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+select {
+  background: var(--glass-hi); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 7px; font: inherit; font-size: 13px; min-height: 30px; cursor: pointer;
+}
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 50px; z-index: 12;
+  display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  background: linear-gradient(180deg, rgba(6, 10, 15, .92), rgba(6, 10, 15, .55) 70%, transparent);
+  pointer-events: none;
+}
+.topbar > * { pointer-events: auto; }
+.topbar .spacer { flex: 1; pointer-events: none; }
+.brand { display: flex; align-items: baseline; gap: 8px; letter-spacing: .02em; white-space: nowrap; }
+.brand b { font-size: 16px; }
+.brand span { color: var(--ink-dim); font-size: 12px; }
+.transport { display: flex; gap: 6px; }
+.readout {
+  font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-dim);
+  display: flex; gap: 12px; white-space: nowrap;
+}
+.readout b { color: var(--ink); font-weight: 600; }
+@media (max-width: 1120px) { .brand span { display: none; } }
+@media (max-width: 940px) { .btn .lbl { display: none; } }
+@media (max-width: 760px) { .readout .opt { display: none; } }
+.palette {
+  position: fixed; left: 10px; top: 58px; bottom: 104px; z-index: 11; width: 132px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); backdrop-filter: blur(9px); overflow: hidden;
+}
+.palette-scroll { height: 100%; overflow-y: auto; padding: 6px; display: grid; gap: 4px; scrollbar-width: thin; }
+.mat {
+  display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 8px;
+  padding: 6px 7px; border-radius: 8px; border: 1px solid transparent; background: transparent;
+  color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; min-height: 32px;
+}
+.mat:hover { background: rgba(120, 160, 210, .14); }
+.mat.is-on { background: rgba(56, 189, 248, .18); border-color: rgba(56, 189, 248, .55); }
+.mat:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mat .dot {
+  width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .22);
+  box-shadow: inset 0 -4px 7px rgba(0, 0, 0, .35);
+}
+.mat .key { color: var(--ink-dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.mat .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; z-index: 11;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center;
+  padding: 8px 12px; max-width: min(940px, calc(100vw - 24px));
+  background: var(--glass); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow); backdrop-filter: blur(9px);
+}
+.tools { display: flex; gap: 5px; flex-wrap: wrap; }
+.tool { min-height: 38px; }
+.tool small { color: inherit; opacity: .55; font-size: 10px; margin-left: 2px; }
+.brush { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-dim); }
+.brush output { font-variant-numeric: tabular-nums; color: var(--ink); min-width: 24px; text-align: right; }
+.brush label.wide { margin-left: 6px; }
+.panel {
+  position: fixed; right: 10px; top: 58px; z-index: 11; width: 292px;
+  max-height: calc(100vh - 172px); display: flex; flex-direction: column;
+  background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); backdrop-filter: blur(9px); overflow: hidden;
+}
+.panel[hidden] { display: none; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.tab {
+  flex: 1; appearance: none; background: transparent; border: 0; border-bottom: 2px solid transparent;
+  color: var(--ink-dim); font: inherit; font-size: 12.5px; padding: 9px 4px; cursor: pointer; min-height: 36px;
+}
+.tab:hover { color: var(--ink); }
+.tab.is-on { color: var(--ink); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.panel-body { overflow-y: auto; padding: 10px; scrollbar-width: thin; }
+.tab-page { display: none; }
+.tab-page.is-on { display: block; }
+.row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 5px 0; min-height: 32px; }
+.row > label { font-size: 12.5px; color: var(--ink-dim); }
+.row.slider { grid-template-columns: 1fr; gap: 3px; }
+.row.slider .head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-dim); }
+.row.slider .head b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.row.slider input { width: 100%; }
+.group { margin: 4px 0 12px; }
+.group > h4 {
+  margin: 10px 0 4px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-dim);
+  border-bottom: 1px solid var(--line); padding-bottom: 4px; font-weight: 600;
+}
+.note { color: var(--ink-dim); font-size: 11.5px; margin: 8px 0 0; }
+.scene-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.scene { min-height: 52px; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 9px; text-align: left; }
+.scene b { font-size: 12.5px; font-weight: 600; }
+.scene span { font-size: 10.5px; color: var(--ink-dim); line-height: 1.25; white-space: normal; }
+.scene.is-on span { color: rgba(4, 32, 46, .75); }
+.help {
+  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px;
+  background: rgba(3, 6, 10, .68); backdrop-filter: blur(3px);
+}
+.help[hidden] { display: none; }
+.help-card {
+  position: relative; max-width: 620px; max-height: calc(100vh - 60px); overflow-y: auto;
+  background: var(--glass-hi); border: 1px solid var(--line); border-radius: 16px;
+  padding: 20px 24px; box-shadow: var(--shadow);
+}
+.help-card h2 { margin: 0 0 12px; font-size: 19px; }
+.help-card h3 { margin: 14px 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.help-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.help-cols dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 12.5px; }
+.help-cols dt { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.help-cols dd { margin: 0; color: var(--ink-dim); }
+.help-card p { color: var(--ink-dim); font-size: 12.5px; margin: 0; }
+.help-close { position: absolute; top: 10px; right: 10px; font-size: 20px; line-height: 1; }
+@media (max-width: 620px) { .help-cols { grid-template-columns: 1fr; } .palette { width: 108px; } }
+
+</style>
+</head>
+<body>
+<noscript><div class="fatal"><h1>Powder Toy 3D</h1><p>This sandbox needs JavaScript switched on.</p></div></noscript>
+
+<canvas id="view" aria-label="3D physics sandbox"></canvas>
+
+<div id="boot" class="fatal" hidden></div>
+
+<div id="ui" hidden>
+
+  <header class="topbar" role="toolbar" aria-label="Simulation controls">
+    <div class="brand"><b>Powder Toy 3D</b><span>a physics sandbox</span></div>
+    <div class="spacer"></div>
+    <div class="transport">
+      <button id="btn-play" class="btn" title="Pause or resume (Space)"><span class="i-pause"></span><span class="lbl">Pause</span></button>
+      <button id="btn-step" class="btn" title="Advance one frame (.)"><span class="i-step"></span><span class="lbl">Step</span></button>
+      <button id="btn-clear" class="btn" title="Remove everything (Backspace)"><span class="i-clear"></span><span class="lbl">Empty</span></button>
+      <button id="btn-reset" class="btn" title="Reload the current scene"><span class="i-reset"></span><span class="lbl">Reset</span></button>
+    </div>
+    <div class="spacer"></div>
+    <div class="readout" id="readout" aria-live="off"></div>
+    <button id="btn-help" class="btn btn-ghost" title="Show the controls (H)">?</button>
+    <button id="btn-panel" class="btn btn-ghost" title="Show or hide the settings (Tab)">&#9776;</button>
+  </header>
+
+  <aside class="palette" aria-label="Materials">
+    <div class="palette-scroll" id="palette"></div>
+  </aside>
+
+  <section class="dock" aria-label="Tools">
+    <div class="tools" id="tools"></div>
+    <div class="brush">
+      <label for="brush-size">Brush</label>
+      <input id="brush-size" type="range" min="1" max="24" step="0.5" value="6">
+      <output id="brush-size-out">6</output>
+      <label for="brush-rate" class="wide">Flow</label>
+      <input id="brush-rate" type="range" min="0" max="100" step="1" value="55">
+      <output id="brush-rate-out">55</output>
+    </div>
+  </section>
+
+  <aside class="panel" id="panel" aria-label="Settings">
+    <nav class="tabs" id="panel-tabs">
+      <button class="tab is-on" data-tab="scenes">Scenes</button>
+      <button class="tab" data-tab="physics">Physics</button>
+      <button class="tab" data-tab="light">Light</button>
+      <button class="tab" data-tab="quality">Quality</button>
+    </nav>
+    <div class="panel-body">
+      <div class="tab-page is-on" data-page="scenes"><div class="scene-grid" id="scenes"></div>
+        <p class="note">Scenes rebuild the sandbox from scratch. Everything you have added is replaced.</p>
+      </div>
+      <div class="tab-page" data-page="physics" id="page-physics"></div>
+      <div class="tab-page" data-page="light" id="page-light"></div>
+      <div class="tab-page" data-page="quality" id="page-quality"></div>
+    </div>
+  </aside>
+
+  <div class="help" id="help" hidden>
+    <div class="help-card">
+      <button class="help-close btn btn-ghost" id="help-close" aria-label="Close">&times;</button>
+      <h2>How to play</h2>
+      <div class="help-cols">
+        <div>
+          <h3>Mouse</h3>
+          <dl>
+            <dt>Left drag</dt><dd>Use the current tool on whatever is under the pointer</dd>
+            <dt>Right drag</dt><dd>Orbit the camera</dd>
+            <dt>Middle drag</dt><dd>Slide the camera sideways</dd>
+            <dt>Wheel</dt><dd>Move closer or further away</dd>
+            <dt>Shift + wheel</dt><dd>Change the brush size</dd>
+            <dt>Ctrl + wheel</dt><dd>Push the brush deeper into the scene or pull it back</dd>
+          </dl>
+        </div>
+        <div>
+          <h3>Keys</h3>
+          <dl>
+            <dt>1 &ndash; 9, 0</dt><dd>Pick a material</dd>
+            <dt>Q W E R T</dt><dd>Pick a tool</dd>
+            <dt>Space</dt><dd>Pause or resume</dd>
+            <dt>.</dt><dd>Advance a single frame</dd>
+            <dt>[ ]</dt><dd>Brush smaller / larger</dd>
+            <dt>Backspace</dt><dd>Empty the box</dd>
+            <dt>Tab</dt><dd>Show or hide the settings</dd>
+            <dt>H</dt><dd>Show or hide this card</dd>
+          </dl>
+        </div>
+      </div>
+      <h3>What is going on underneath</h3>
+      <p id="help-physics"></p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){'use strict';
+
+/* ---- 01-math.js ---- */
+const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+const TAU = Math.PI * 2;
+function v3(x = 0, y = 0, z = 0) { return [x, y, z]; }
+function v3add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function v3sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function v3scale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+function v3dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function v3cross(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function v3len(a) { return Math.hypot(a[0], a[1], a[2]); }
+function v3norm(a) { const l = v3len(a); return l > 1e-12 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0]; }
+function mat4Identity() {
+  return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+}
+/** out = a * b, both column-major. */
+function mat4Mul(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    }
+  }
+  return o;
+}
+/** Right-handed perspective, looking down -z, mapping to clip z in [-1, 1]. */
+function mat4Perspective(fovyRad, aspect, near, far) {
+  const f = 1 / Math.tan(fovyRad / 2);
+  const nf = 1 / (near - far);
+  const o = new Float32Array(16);
+  o[0] = f / aspect; o[5] = f; o[10] = (far + near) * nf; o[11] = -1; o[14] = 2 * far * near * nf;
+  return o;
+}
+function mat4LookAt(eye, target, up) {
+  const z = v3norm(v3sub(eye, target));
+  let x = v3cross(up, z);
+  if (v3len(x) < 1e-6) x = v3cross([0, 0, 1], z);
+  x = v3norm(x);
+  const y = v3cross(z, x);
+  const o = new Float32Array(16);
+  o[0] = x[0]; o[4] = x[1]; o[8] = x[2]; o[12] = -v3dot(x, eye);
+  o[1] = y[0]; o[5] = y[1]; o[9] = y[2]; o[13] = -v3dot(y, eye);
+  o[2] = z[0]; o[6] = z[1]; o[10] = z[2]; o[14] = -v3dot(z, eye);
+  o[15] = 1;
+  return o;
+}
+/** General 4x4 inverse. Returns the identity if the matrix is singular. */
+function mat4Invert(m) {
+  const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+  const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+  const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+  const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+  const b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10;
+  const b03 = a01 * a12 - a02 * a11, b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;
+  const b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30, b08 = a20 * a33 - a23 * a30;
+  const b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;
+  const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!det) return mat4Identity();
+  const d = 1 / det;
+  return new Float32Array([
+    (a11 * b11 - a12 * b10 + a13 * b09) * d, (a02 * b10 - a01 * b11 - a03 * b09) * d,
+    (a31 * b05 - a32 * b04 + a33 * b03) * d, (a22 * b04 - a21 * b05 - a23 * b03) * d,
+    (a12 * b08 - a10 * b11 - a13 * b07) * d, (a00 * b11 - a02 * b08 + a03 * b07) * d,
+    (a32 * b02 - a30 * b05 - a33 * b01) * d, (a20 * b05 - a22 * b02 + a23 * b01) * d,
+    (a10 * b10 - a11 * b08 + a13 * b06) * d, (a01 * b08 - a00 * b10 - a03 * b06) * d,
+    (a30 * b04 - a31 * b02 + a33 * b00) * d, (a21 * b02 - a20 * b04 - a23 * b00) * d,
+    (a11 * b07 - a10 * b09 - a12 * b06) * d, (a00 * b09 - a01 * b07 + a02 * b06) * d,
+    (a31 * b01 - a30 * b03 - a32 * b00) * d, (a20 * b03 - a21 * b01 + a22 * b00) * d,
+  ]);
+}
+/** Transform a point by a column-major matrix and divide through by w. */
+function mat4Project(m, p) {
+  const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+  const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+  const z = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
+  const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+  const iw = Math.abs(w) > 1e-12 ? 1 / w : 0;
+  return [x * iw, y * iw, z * iw];
+}
+/**
+ * Where a ray enters and leaves an axis-aligned box.
+ * Returns { tNear, tFar } with tFar < tNear when the ray misses.
+ */
+function rayBox(origin, dir, lo, hi) {
+  let tNear = -Infinity;
+  let tFar = Infinity;
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(dir[i]) < 1e-9) {
+      if (origin[i] < lo[i] || origin[i] > hi[i]) return { tNear: 1, tFar: 0 };
+      continue;
+    }
+    const inv = 1 / dir[i];
+    let t0 = (lo[i] - origin[i]) * inv;
+    let t1 = (hi[i] - origin[i]) * inv;
+    if (t0 > t1) { const t = t0; t0 = t1; t1 = t; }
+    if (t0 > tNear) tNear = t0;
+    if (t1 < tFar) tFar = t1;
+  }
+  return { tNear, tFar };
+}
+/** Halton low-discrepancy sequence - used to jitter camera rays for anti-aliasing. */
+function halton(index, base) {
+  let f = 1;
+  let r = 0;
+  let i = index;
+  while (i > 0) { f /= base; r += f * (i % base); i = Math.floor(i / base); }
+  return r;
+}
+/** Split a Z-depth of `nz` slices into a roughly square tile layout for the atlas. */
+function tileLayout(nz) {
+  const tx = Math.ceil(Math.sqrt(nz));
+  return { tx, ty: Math.ceil(nz / tx) };
+}
+
+/* ---- 02-materials.js ---- */
+const PHASE = { LIQUID: 0, GRANULAR: 1, GAS: 2, RIGID: 3 };
+/** Materials, in palette order. Index in this array IS the id used on the GPU. */
+const MATERIALS = [
+  {
+    id: 0, name: 'Empty', phase: PHASE.GAS, hidden: true,
+    density: 1.2, viscosity: 0, friction: 0, cohesion: 0,
+    albedo: [0, 0, 0], roughness: 1, metallic: 0, ior: 1, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 2e-5, temp: 20, glow: 0, life: 0,
+  },
+  {
+    id: 1, name: 'Water', swatch: '#2f7fd0', blurb: 'Incompressible, 0.073 N/m surface tension',
+    phase: PHASE.LIQUID, density: 998, viscosity: 1.0e-6, friction: 0, cohesion: 0,
+    albedo: [0.02, 0.04, 0.05], roughness: 0.02, metallic: 0, ior: 1.333, transmission: 1,
+    absorb: [0.45, 0.09, 0.02], surfaceTension: 0.0728, alpha: 1.4e-7, temp: 20, glow: 0, life: 0,
+    freeze: { at: -0.5, into: 'Ice' }, boil: { at: 100, into: 'Steam' },
+  },
+  {
+    id: 2, name: 'Oil', swatch: '#8a6a2a', blurb: 'Floats on water, burns at 210 C',
+    phase: PHASE.LIQUID, density: 870, viscosity: 8.0e-5, friction: 0, cohesion: 0,
+    albedo: [0.10, 0.07, 0.03], roughness: 0.05, metallic: 0, ior: 1.47, transmission: 0.8,
+    absorb: [0.30, 0.62, 1.8], surfaceTension: 0.032, alpha: 8e-8, temp: 20, glow: 0, life: 0,
+    burn: { at: 210, into: 'Fire' },
+  },
+  {
+    id: 3, name: 'Honey', swatch: '#d79a2b', blurb: 'Very viscous - 7e-3 m2/s',
+    phase: PHASE.LIQUID, density: 1420, viscosity: 7.0e-3, friction: 0, cohesion: 0,
+    albedo: [0.35, 0.17, 0.03], roughness: 0.06, metallic: 0, ior: 1.49, transmission: 0.7,
+    absorb: [0.35, 0.95, 3.0], surfaceTension: 0.06, alpha: 1.0e-7, temp: 20, glow: 0, life: 0,
+    burn: { at: 320, into: 'Smoke' },
+  },
+  {
+    id: 4, name: 'Lava', swatch: '#e2521a', blurb: 'Glows by Planck’s law, sets to stone below 700 C',
+    phase: PHASE.LIQUID, density: 2800, viscosity: 2.0e-2, friction: 0, cohesion: 0,
+    albedo: [0.10, 0.03, 0.015], roughness: 0.55, metallic: 0, ior: 1.6, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0.36, alpha: 6e-7, temp: 1150, glow: 1, life: 0,
+    freeze: { at: 700, into: 'Stone' }, sustain: { at: 1150, rate: 0.12 },
+  },
+  {
+    id: 5, name: 'Mercury', swatch: '#c8ccd4', blurb: '13.5x water, a liquid mirror',
+    phase: PHASE.LIQUID, density: 13534, viscosity: 1.1e-7, friction: 0, cohesion: 0,
+    albedo: [0.78, 0.78, 0.80], roughness: 0.035, metallic: 1, ior: 1.0, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0.486, alpha: 4.4e-6, temp: 20, glow: 0, life: 0,
+  },
+  {
+    id: 6, name: 'Sand', swatch: '#c9a463', blurb: 'Piles at its 34° angle of repose',
+    phase: PHASE.GRANULAR, density: 1600, viscosity: 0, friction: 0.675, cohesion: 0.02,
+    albedo: [0.72, 0.58, 0.36], roughness: 0.90, metallic: 0, ior: 1.46, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 3e-7, temp: 20, glow: 0, life: 0,
+    melt: { at: 1600, into: 'Glass' },
+  },
+  {
+    id: 7, name: 'Snow', swatch: '#e8f1fb', blurb: 'Sticky powder, melts above 0 C',
+    phase: PHASE.GRANULAR, density: 300, viscosity: 0, friction: 0.78, cohesion: 0.42,
+    albedo: [0.90, 0.93, 0.97], roughness: 0.70, metallic: 0, ior: 1.31, transmission: 0.06,
+    absorb: [0.2, 0.1, 0.05], surfaceTension: 0, alpha: 4e-7, temp: -8, glow: 0, life: 0,
+    melt: { at: 0.5, into: 'Water' },
+  },
+  {
+    id: 8, name: 'Ash', swatch: '#6b6560', blurb: 'Light, slippery dust',
+    phase: PHASE.GRANULAR, density: 700, viscosity: 0, friction: 0.50, cohesion: 0.06,
+    albedo: [0.20, 0.185, 0.17], roughness: 0.96, metallic: 0, ior: 1.4, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 2e-7, temp: 60, glow: 0, life: 0,
+  },
+  {
+    id: 9, name: 'Stone', swatch: '#8b8781', blurb: 'Fixed in place until it melts at 1000 C',
+    phase: PHASE.RIGID, density: 2650, viscosity: 0, friction: 0.9, cohesion: 1,
+    albedo: [0.34, 0.32, 0.30], roughness: 0.85, metallic: 0, ior: 1.5, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 1.2e-6, temp: 20, glow: 0.9, life: 0,
+    melt: { at: 1000, into: 'Lava' },
+  },
+  {
+    id: 10, name: 'Ice', swatch: '#a8d6ea', blurb: 'Clear solid, melts above 0 C',
+    phase: PHASE.RIGID, density: 917, viscosity: 0, friction: 0.05, cohesion: 1,
+    albedo: [0.50, 0.68, 0.78], roughness: 0.10, metallic: 0, ior: 1.31, transmission: 0.78,
+    absorb: [0.30, 0.10, 0.05], surfaceTension: 0, alpha: 1.2e-6, temp: -12, glow: 0, life: 0,
+    melt: { at: 0.5, into: 'Water' },
+  },
+  {
+    id: 11, name: 'Steel', swatch: '#9aa2ad', blurb: 'Conducts heat fast, melts at 1450 C',
+    phase: PHASE.RIGID, density: 7850, viscosity: 0, friction: 0.6, cohesion: 1,
+    albedo: [0.56, 0.57, 0.58], roughness: 0.26, metallic: 1, ior: 1.0, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 1.2e-5, temp: 20, glow: 1, life: 0,
+    melt: { at: 1450, into: 'Lava' },
+  },
+  {
+    id: 12, name: 'Glass', swatch: '#cfe9ee', blurb: 'What sand becomes at 1600 C',
+    phase: PHASE.RIGID, density: 2500, viscosity: 0, friction: 0.4, cohesion: 1,
+    albedo: [0.60, 0.72, 0.75], roughness: 0.03, metallic: 0, ior: 1.52, transmission: 0.95,
+    absorb: [0.06, 0.04, 0.08], surfaceTension: 0, alpha: 5e-7, temp: 20, glow: 0.8, life: 0,
+    melt: { at: 1500, into: 'Lava' },
+  },
+  {
+    id: 13, name: 'Wood', swatch: '#6b4423', blurb: 'Catches fire at 300 C',
+    phase: PHASE.RIGID, density: 650, viscosity: 0, friction: 0.7, cohesion: 1,
+    albedo: [0.26, 0.16, 0.08], roughness: 0.78, metallic: 0, ior: 1.5, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 1.6e-7, temp: 20, glow: 0, life: 0,
+    burn: { at: 300, into: 'Fire' },
+  },
+  {
+    id: 14, name: 'Fire', swatch: '#ff9d2e', blurb: 'Burns for a moment, then smokes',
+    phase: PHASE.GAS, density: 0.3, viscosity: 1.5e-5, friction: 0, cohesion: 0,
+    albedo: [0.05, 0.03, 0.02], roughness: 1, metallic: 0, ior: 1, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 2e-5, temp: 950, glow: 1, life: 1.4,
+    expires: 'Smoke', sustain: { at: 950, rate: 9 },
+  },
+  {
+    id: 15, name: 'Steam', swatch: '#d4dde6', blurb: 'Rises, and turns back to water below 100 C',
+    phase: PHASE.GAS, density: 0.6, viscosity: 2.0e-5, friction: 0, cohesion: 0,
+    albedo: [0.86, 0.89, 0.92], roughness: 1, metallic: 0, ior: 1, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 2e-5, temp: 130, glow: 0, life: 0,
+    freeze: { at: 96, into: 'Water' },
+  },
+  {
+    id: 16, name: 'Smoke', swatch: '#4a4f57', blurb: 'Rises while it is warm, then fades',
+    phase: PHASE.GAS, density: 1.0, viscosity: 1.8e-5, friction: 0, cohesion: 0,
+    albedo: [0.06, 0.06, 0.07], roughness: 1, metallic: 0, ior: 1, transmission: 0,
+    absorb: [0, 0, 0], surfaceTension: 0, alpha: 2e-5, temp: 220, glow: 0, life: 7,
+    expires: 'Empty',
+  },
+];
+const MAT_COUNT = MATERIALS.length;
+const MAT_ROWS = 9;                       // vec4 rows per material in the lookup texture
+const MAT_BY_NAME = new Map(MATERIALS.map((m) => [m.name, m]));
+const matId = (name) => (MAT_BY_NAME.get(name) || MATERIALS[0]).id;
+/** Materials the palette offers, i.e. everything except the "nothing here" slot. */
+const PAINTABLE = MATERIALS.filter((m) => !m.hidden);
+/** Density relative to water, clamped so the Poisson solve stays well conditioned. */
+function simDensity(m) { return clamp(m.density / 998, 0.04, 8); }
+/** sRGB swatch colour for the palette; falls back to the linear albedo. */
+function swatchOf(m) {
+  if (m.swatch) return m.swatch;
+  const enc = (c) => Math.round(255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055));
+  return `rgb(${enc(m.albedo[0])},${enc(m.albedo[1])},${enc(m.albedo[2])})`;
+}
+/**
+ * Flatten the table into the RGBA32F lookup texture the shaders read with
+ * texelFetch(uMat, ivec2(row, id), 0). Width MAT_ROWS, height MAT_COUNT.
+ *
+ *  row 0  density(rel)   viscosity      friction        cohesion
+ *  row 1  albedo.rgb                                    glow gain
+ *  row 2  roughness      metallic       ior             transmission
+ *  row 3  isLiquid       isGranular     isGas           isRigid
+ *  row 4  meltAt         meltInto       freezeAt        freezeInto
+ *  row 5  boilAt         boilInto       burnAt          burnInto
+ *  row 6  absorb.rgb                                    thermal diffusivity
+ *  row 7  lifetime       expiresInto    surfaceTension  start temperature
+ *  row 8  sustain temp   sustain rate   -               -
+ */
+function packMaterials() {
+  const data = new Float32Array(MAT_ROWS * 4 * MAT_COUNT);
+  const put = (m, row, a, b, c, d) => {
+    const o = (m.id * MAT_ROWS + row) * 4;
+    data[o] = a; data[o + 1] = b; data[o + 2] = c; data[o + 3] = d;
+  };
+  const change = (t) => (t ? [t.at, matId(t.into)] : [1e9, 0]);
+  const changeDown = (t) => (t ? [t.at, matId(t.into)] : [-1e9, 0]);
+  for (const m of MATERIALS) {
+    put(m, 0, simDensity(m), m.viscosity, m.friction, m.cohesion);
+    put(m, 1, m.albedo[0], m.albedo[1], m.albedo[2], m.glow || 0);
+    put(m, 2, m.roughness, m.metallic, m.ior, m.transmission);
+    put(m, 3, m.phase === PHASE.LIQUID ? 1 : 0, m.phase === PHASE.GRANULAR ? 1 : 0,
+      m.phase === PHASE.GAS ? 1 : 0, m.phase === PHASE.RIGID ? 1 : 0);
+    const [meltAt, meltInto] = change(m.melt);
+    const [freezeAt, freezeInto] = changeDown(m.freeze);
+    put(m, 4, meltAt, meltInto, freezeAt, freezeInto);
+    const [boilAt, boilInto] = change(m.boil);
+    const [burnAt, burnInto] = change(m.burn);
+    put(m, 5, boilAt, boilInto, burnAt, burnInto);
+    put(m, 6, m.absorb[0], m.absorb[1], m.absorb[2], m.alpha);
+    put(m, 7, m.life || 0, m.expires ? matId(m.expires) : 0, m.surfaceTension, m.temp);
+    put(m, 8, m.sustain ? m.sustain.at : 0, m.sustain ? m.sustain.rate : 0, 0, 0);
+  }
+  return data;
+}
+
+/* ---- 03-scenes.js ---- */
+/** Collects regions, then turns them into particles packed cell by cell. */
+function makeSceneBuilder() {
+  const regions = [];
+  const emitters = [];
+  return {
+    regions, emitters,
+    box(mat, lo, hi, opt) { regions.push({ mat, kind: 'box', lo, hi, ...opt }); return this; },
+    sphere(mat, c, r, opt) { regions.push({ mat, kind: 'sphere', c, r, ...opt }); return this; },
+    shape(mat, fn, opt) { regions.push({ mat, kind: 'fn', fn, ...opt }); return this; },
+    /** at: normalised centre, radius: cells, vel: m/s, rate: particles per second. */
+    emit(mat, at, radius, vel, rate) { emitters.push({ mat, at, radius, vel, rate }); return this; },
+  };
+}
+function regionHit(r, x, y, z) {
+  if (r.kind === 'box') {
+    return x >= r.lo[0] && x <= r.hi[0] && y >= r.lo[1] && y <= r.hi[1] && z >= r.lo[2] && z <= r.hi[2];
+  }
+  if (r.kind === 'sphere') return Math.hypot(x - r.c[0], y - r.c[1], z - r.c[2]) <= r.r;
+  return r.fn(x, y, z);
+}
+/**
+ * Turn a scene into particle data ready to upload.
+ * `pos` is xyz in cell units with the material id in w; `vel` is xyz m/s with
+ * the temperature in w; `aux` is (life left, random seed, phase progress, volume).
+ *
+ * Volume is measured in whole cells, so a cell packed with four particles gives
+ * each of them 0.25. Carrying it per particle means the rest density of a cell is
+ * simply the material density however finely (or coarsely) it happens to be filled.
+ */
+function buildParticles(scene, nx, ny, nz, capacity, rand = Math.random) {
+  const b = makeSceneBuilder();
+  scene.build(b);
+  const regions = b.regions;
+  const cells = [];
+  for (let k = 0; k < nz; k++) {
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const x = (i + 0.5) / nx, y = (j + 0.5) / ny, z = (k + 0.5) / nz;
+        for (let r = regions.length - 1; r >= 0; r--) {
+          if (regionHit(regions[r], x, y, z)) { cells.push(i, j, k, r); break; }
+        }
+      }
+    }
+  }
+  const cellCount = cells.length / 4;
+  const budget = Math.max(1, Math.floor(capacity * 0.66));
+  const perCell = cellCount ? clamp(Math.floor(budget / cellCount), 1, 8) : 4;
+  const count = Math.min(capacity, cellCount * perCell);
+  const pos = new Float32Array(count * 4);
+  const vel = new Float32Array(count * 4);
+  const aux = new Float32Array(count * 4);
+  const off = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
+  let n = 0;
+  let rigidCount = 0;
+  for (const wantRigid of [true, false]) {
+    for (let c = 0; c < cellCount && n < count; c++) {
+      const i = cells[c * 4], j = cells[c * 4 + 1], k = cells[c * 4 + 2];
+      const region = regions[cells[c * 4 + 3]];
+      const m = MATERIALS[matId(region.mat)];
+      if ((m.phase === PHASE.RIGID) !== wantRigid) continue;
+      const temp = region.temp != null ? region.temp : m.temp;
+      const here = m.phase === PHASE.RIGID ? Math.min(perCell, 2) : perCell;
+      for (let p = 0; p < here && n < count; p++, n++) {
+        const o = off[p % 8];
+        pos[n * 4] = i + (o[0] + rand()) * 0.5;
+        pos[n * 4 + 1] = j + (o[1] + rand()) * 0.5;
+        pos[n * 4 + 2] = k + (o[2] + rand()) * 0.5;
+        pos[n * 4 + 3] = m.id;
+        vel[n * 4 + 3] = temp;
+        aux[n * 4] = m.life || 0;
+        aux[n * 4 + 1] = rand();
+        aux[n * 4 + 3] = 1 / here;
+      }
+    }
+    if (wantRigid) rigidCount = n;
+  }
+  return {
+    pos: n === count ? pos : pos.subarray(0, n * 4),
+    vel: n === count ? vel : vel.subarray(0, n * 4),
+    aux: n === count ? aux : aux.subarray(0, n * 4),
+    count: n, rigidCount, perCell, emitters: b.emitters, cellCount,
+  };
+}
+const SCENES = [
+  {
+    id: 'dam', name: 'Dam break', blurb: 'A wall of water let go all at once',
+    camera: { yaw: -0.62, pitch: 0.30, dist: 2.5 },
+    build: (s) => {
+      s.box('Water', [0.02, 0.02, 0.10], [0.30, 0.66, 0.90]);
+      s.box('Stone', [0.60, 0.02, 0.34], [0.70, 0.26, 0.66]);
+    },
+  },
+  {
+    id: 'waterfall', name: 'Waterfall', blurb: 'A spout onto stone steps',
+    camera: { yaw: -0.72, pitch: 0.26, dist: 2.6 },
+    build: (s) => {
+      s.box('Stone', [0.34, 0.34, 0.14], [0.96, 0.40, 0.56]);
+      s.box('Stone', [0.06, 0.14, 0.44], [0.60, 0.20, 0.94]);
+      s.box('Water', [0.02, 0.02, 0.02], [0.98, 0.07, 0.98]);
+      s.emit('Water', [0.84, 0.80, 0.34], 2.6, [-0.7, -1.4, 0.15], 5200);
+    },
+  },
+  {
+    id: 'hourglass', name: 'Hourglass', blurb: 'Sand through a stone funnel',
+    camera: { yaw: -0.35, pitch: 0.14, dist: 2.5 },
+    build: (s) => {
+      const mouth = (y) => 0.05 + (y - 0.34) * 1.05;
+      s.shape('Stone', (x, y, z) => {
+        if (y < 0.34 || y > 0.70) return false;
+        const d = Math.hypot(x - 0.5, z - 0.5);
+        return d > mouth(y) && d < mouth(y) + 0.055;
+      });
+      s.shape('Sand', (x, y, z) => {
+        if (y < 0.40 || y > 0.86) return false;
+        return Math.hypot(x - 0.5, z - 0.5) < mouth(y);
+      });
+    },
+  },
+  {
+    id: 'volcano', name: 'Volcano', blurb: 'Lava into a cold lake - expect steam',
+    camera: { yaw: -0.55, pitch: 0.22, dist: 2.7 },
+    build: (s) => {
+      s.shape('Stone', (x, y, z) => {
+        const d = Math.hypot(x - 0.5, z - 0.5);
+        return y < 0.58 && d < 0.40 - y * 0.44 && d > 0.06;
+      });
+      s.box('Water', [0.02, 0.02, 0.02], [0.98, 0.16, 0.98]);
+      s.emit('Lava', [0.5, 0.56, 0.5], 2.4, [0, 2.8, 0], 3000);
+    },
+  },
+  {
+    id: 'layers', name: 'Density tower', blurb: 'Oil rises, mercury plunges, water stays put',
+    camera: { yaw: -0.30, pitch: 0.14, dist: 2.3 },
+    build: (s) => {
+      s.box('Oil', [0.10, 0.04, 0.10], [0.90, 0.13, 0.90]);
+      s.box('Water', [0.08, 0.14, 0.08], [0.92, 0.52, 0.92]);
+      s.sphere('Mercury', [0.5, 0.78, 0.5], 0.10);
+    },
+  },
+  {
+    id: 'thaw', name: 'Thaw', blurb: 'An ice block on a red hot steel plate',
+    camera: { yaw: -0.48, pitch: 0.24, dist: 2.4 },
+    build: (s) => {
+      s.box('Stone', [0.02, 0.02, 0.02], [0.98, 0.05, 0.98]);
+      s.box('Steel', [0.12, 0.05, 0.12], [0.88, 0.10, 0.88], { temp: 1150 });
+      s.box('Ice', [0.30, 0.11, 0.30], [0.70, 0.46, 0.70]);
+    },
+  },
+  {
+    id: 'snow', name: 'Snowfall', blurb: 'Powder settling on a rocky ridge',
+    camera: { yaw: -0.6, pitch: 0.28, dist: 2.6 },
+    build: (s) => {
+      s.shape('Stone', (x, y, z) => y < 0.14 + 0.13 * Math.sin(x * 5.4) * Math.cos(z * 4.1));
+      s.emit('Snow', [0.5, 0.95, 0.5], 21.0, [0, -0.4, 0], 3200);
+    },
+  },
+  {
+    id: 'bonfire', name: 'Bonfire', blurb: 'Oil-soaked logs and a lit match',
+    camera: { yaw: -0.55, pitch: 0.22, dist: 2.5 },
+    build: (s) => {
+      s.box('Stone', [0.02, 0.02, 0.02], [0.98, 0.06, 0.98]);
+      for (let i = 0; i < 4; i++) {
+        const odd = i % 2;
+        const lo = odd ? [0.26, 0.07 + i * 0.05, 0.34] : [0.34, 0.07 + i * 0.05, 0.26];
+        const hi = odd ? [0.74, 0.105 + i * 0.05, 0.66] : [0.66, 0.105 + i * 0.05, 0.74];
+        s.box('Wood', lo, hi);
+      }
+      s.box('Oil', [0.34, 0.27, 0.34], [0.66, 0.32, 0.66]);
+      s.sphere('Lava', [0.5, 0.36, 0.5], 0.05);
+    },
+  },
+  {
+    id: 'rain', name: 'Rain', blurb: 'A downpour into a rocky basin',
+    camera: { yaw: -0.42, pitch: 0.28, dist: 2.6 },
+    build: (s) => {
+      s.shape('Stone', (x, y, z) => {
+        const d = Math.hypot(x - 0.5, z - 0.5);
+        return y < 0.26 && (d > 0.42 || y < 0.05);
+      });
+      s.box('Water', [0.10, 0.05, 0.10], [0.90, 0.12, 0.90]);
+      s.emit('Water', [0.5, 0.96, 0.5], 23.0, [0, -1.4, 0], 2600);
+    },
+  },
+  {
+    id: 'empty', name: 'Empty box', blurb: 'Nothing at all - build your own',
+    camera: { yaw: -0.45, pitch: 0.26, dist: 2.5 },
+    build: () => {},
+  },
+];
+
+/* ---- 10-gl.js ---- */
+class GLError extends Error {}
+/** Every 3D field is a stack of z-slices tiled into one 2D texture. */
+function atlasFor(nx, ny, nz) {
+  const { tx, ty } = tileLayout(nz);
+  return { nx, ny, nz, tx, ty, w: nx * tx, h: ny * ty };
+}
+class Gfx {
+  constructor(canvas) {
+    const opts = { alpha: false, antialias: false, depth: false, stencil: false, desynchronized: true,
+      powerPreference: 'high-performance', preserveDrawingBuffer: false };
+    const gl = canvas.getContext('webgl2', opts);
+    if (!gl) throw new GLError('This computer’s browser cannot do WebGL 2.');
+    this.gl = gl;
+    this.canvas = canvas;
+    if (!gl.getExtension('EXT_color_buffer_float')) {
+      throw new GLError('This graphics card cannot render to floating point textures (EXT_color_buffer_float).');
+    }
+    this.floatBlend = !!gl.getExtension('EXT_float_blend');
+    this.floatLinear = !!gl.getExtension('OES_texture_float_linear');
+    this.maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
+    if (this.maxDrawBuffers < 4) throw new GLError('This graphics card supports too few render targets.');
+    this.maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    this.renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : 'unknown graphics card';
+    this.programs = new Map();
+    this.owned = new Set();
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(gl.createVertexArray());
+  }
+  compile(type, src, name) {
+    const gl = this.gl;
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(sh) || '';
+      const lines = src.split('\n');
+      const shown = [];
+      for (const m of log.matchAll(/(\d+):(\d+)/g)) {
+        const ln = Number(m[2]);
+        for (let i = Math.max(1, ln - 2); i <= Math.min(lines.length, ln + 2); i++) {
+          shown.push(`${i === ln ? '>' : ' '} ${String(i).padStart(4)} | ${lines[i - 1]}`);
+        }
+        shown.push('');
+      }
+      gl.deleteShader(sh);
+      throw new GLError(`Shader "${name}" failed to compile:\n${log}\n${shown.join('\n')}`);
+    }
+    return sh;
+  }
+  /** Build (and cache) a program. `vs` defaults to the full-screen triangle. */
+  program(name, fs, vs = VS_FULLSCREEN) {
+    if (this.programs.has(name)) return this.programs.get(name);
+    const gl = this.gl;
+    const p = gl.createProgram();
+    const v = this.compile(gl.VERTEX_SHADER, vs, name + ':vs');
+    const f = this.compile(gl.FRAGMENT_SHADER, fs, name + ':fs');
+    gl.attachShader(p, v);
+    gl.attachShader(p, f);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      throw new GLError(`Shader "${name}" failed to link:\n${gl.getProgramInfoLog(p)}`);
+    }
+    gl.deleteShader(v);
+    gl.deleteShader(f);
+    const uniforms = new Map();
+    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) {
+      const info = gl.getActiveUniform(p, i);
+      const base = info.name.replace(/\[0\]$/, '');
+      uniforms.set(base, { loc: gl.getUniformLocation(p, info.name), type: info.type, size: info.size });
+    }
+    const rec = { prog: p, uniforms, name };
+    this.programs.set(name, rec);
+    return rec;
+  }
+  setUniforms(rec, values) {
+    const gl = this.gl;
+    let unit = 0;
+    for (const [key, val] of Object.entries(values)) {
+      const u = rec.uniforms.get(key);
+      if (!u || val == null) continue;
+      switch (u.type) {
+        case gl.SAMPLER_2D:
+        case gl.SAMPLER_2D_ARRAY:
+        case gl.INT_SAMPLER_2D:
+          gl.activeTexture(gl.TEXTURE0 + unit);
+          gl.bindTexture(gl.TEXTURE_2D, val.tex || val);
+          gl.uniform1i(u.loc, unit);
+          unit++;
+          break;
+        case gl.FLOAT: Array.isArray(val) ? gl.uniform1fv(u.loc, val) : gl.uniform1f(u.loc, val); break;
+        case gl.FLOAT_VEC2: gl.uniform2fv(u.loc, val); break;
+        case gl.FLOAT_VEC3: gl.uniform3fv(u.loc, val); break;
+        case gl.FLOAT_VEC4: gl.uniform4fv(u.loc, val); break;
+        case gl.FLOAT_MAT3: gl.uniformMatrix3fv(u.loc, false, val); break;
+        case gl.FLOAT_MAT4: gl.uniformMatrix4fv(u.loc, false, val); break;
+        case gl.INT: Array.isArray(val) ? gl.uniform1iv(u.loc, val) : gl.uniform1i(u.loc, val | 0); break;
+        case gl.INT_VEC2: gl.uniform2iv(u.loc, val); break;
+        case gl.INT_VEC3: gl.uniform3iv(u.loc, val); break;
+        case gl.UNSIGNED_INT: gl.uniform1ui(u.loc, val >>> 0); break;
+        case gl.UNSIGNED_INT_VEC2: gl.uniform2uiv(u.loc, val); break;
+        case gl.UNSIGNED_INT_VEC3: gl.uniform3uiv(u.loc, val); break;
+        case gl.BOOL: gl.uniform1i(u.loc, val ? 1 : 0); break;
+        default: break;
+      }
+    }
+  }
+  texture(w, h, { internal = 'RGBA16F', filter = 'LINEAR', wrap = 'CLAMP_TO_EDGE', data = null } = {}) {
+    const gl = this.gl;
+    const F = {
+      RGBA16F: [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT],
+      RGBA32F: [gl.RGBA32F, gl.RGBA, gl.FLOAT],
+      RG16F: [gl.RG16F, gl.RG, gl.HALF_FLOAT],
+      R16F: [gl.R16F, gl.RED, gl.HALF_FLOAT],
+      R32F: [gl.R32F, gl.RED, gl.FLOAT],
+      RGBA8: [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE],
+    }[internal];
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    const f = (internal.endsWith('32F') && !this.floatLinear) ? gl.NEAREST : gl[filter];
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl[wrap]);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl[wrap]);
+    gl.texImage2D(gl.TEXTURE_2D, 0, F[0], w, h, 0, F[1], F[2], data);
+    const rec = { tex, w, h, internal };
+    this.owned.add(rec);
+    return rec;
+  }
+  /** Replace a rectangle of a texture. `data` is always plain Float32 (or bytes for RGBA8). */
+  upload(t, data, x = 0, y = 0, w = t.w, h = t.h) {
+    const gl = this.gl;
+    const [fmt, type] = {
+      RGBA16F: [gl.RGBA, gl.FLOAT], RGBA32F: [gl.RGBA, gl.FLOAT],
+      R32F: [gl.RED, gl.FLOAT], R16F: [gl.RED, gl.FLOAT],
+      RG16F: [gl.RG, gl.FLOAT], RGBA8: [gl.RGBA, gl.UNSIGNED_BYTE],
+    }[t.internal];
+    gl.bindTexture(gl.TEXTURE_2D, t.tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, fmt, type, data);
+  }
+  framebuffer(targets) {
+    const gl = this.gl;
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    const bufs = [];
+    targets.forEach((t, i) => {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t.tex, 0);
+      bufs.push(gl.COLOR_ATTACHMENT0 + i);
+    });
+    gl.drawBuffers(bufs);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new GLError(`Could not set up an off-screen buffer (0x${status.toString(16)}).`);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const rec = { fb, w: targets[0].w, h: targets[0].h, n: targets.length };
+    this.owned.add(rec);
+    return rec;
+  }
+  /** Delete one texture or framebuffer. */
+  free(o) {
+    if (!o || !this.owned.has(o)) return;
+    if (o.tex) this.gl.deleteTexture(o.tex); else if (o.fb) this.gl.deleteFramebuffer(o.fb);
+    this.owned.delete(o);
+  }
+  /** Delete every texture and framebuffer; compiled programs are kept. */
+  releaseAll() { for (const o of [...this.owned]) this.free(o); }
+  bind(target) {
+    const gl = this.gl;
+    if (target) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);
+      gl.viewport(0, 0, target.w, target.h);
+    } else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    }
+  }
+  /** Run a fragment shader over every texel of `target`. */
+  pass(target, rec, uniforms) {
+    const gl = this.gl;
+    this.bind(target);
+    gl.useProgram(rec.prog);
+    this.setUniforms(rec, uniforms);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  /** Draw `count` points, additively blended into `target`. Used for scatter passes. */
+  scatter(target, rec, uniforms, count, { clear = false } = {}) {
+    const gl = this.gl;
+    this.bind(target);
+    if (clear) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.useProgram(rec.prog);
+    this.setUniforms(rec, uniforms);
+    gl.drawArrays(gl.POINTS, 0, count);
+    gl.disable(gl.BLEND);
+  }
+  clear(target, r = 0, g = 0, b = 0, a = 0) {
+    this.bind(target);
+    this.gl.clearColor(r, g, b, a);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+  }
+  /** Draw `count` points with blending off, e.g. to write a run of particles. */
+  points(target, rec, uniforms, count) {
+    const gl = this.gl;
+    this.bind(target);
+    gl.useProgram(rec.prog);
+    this.setUniforms(rec, uniforms);
+    gl.drawArrays(gl.POINTS, 0, count);
+  }
+}
+/** Covers the whole target with one oversized triangle - no vertex buffer needed. */
+const VS_FULLSCREEN = `#version 300 es
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+/* ---- 20-glsl-common.js ---- */
+const GLSL_HEAD = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+`;
+const GLSL_COMMON = `
+const float PI = 3.141592653589793;
+const float INV_PI = 0.3183098861837907;
+const float T_ZERO_C = 273.15;
+
+// ---------------------------------------------------------------- grid atlas
+// A grid of nx*ny*nz cells is stored as nz slices of nx*ny, tiled tx across and
+// ty down one 2D texture. Cell (i,j,k) has its centre at (i+0.5, j+0.5, k+0.5).
+uniform vec3 uGrid;    // nx, ny, nz
+uniform vec2 uTiles;   // tx, ty
+uniform vec2 uAtlas;   // texture size
+
+ivec3 gridSize() { return ivec3(uGrid + 0.5); }
+
+ivec2 cellTexel(ivec3 c) {
+  int tx = int(uTiles.x + 0.5);
+  ivec3 n = gridSize();
+  return ivec2((c.z - (c.z / tx) * tx) * n.x + c.x, (c.z / tx) * n.y + c.y);
+}
+
+/** Inverse of cellTexel; z may land past the end when the atlas has spare tiles. */
+ivec3 texelCell(ivec2 t) {
+  ivec3 n = gridSize();
+  int tx = int(uTiles.x + 0.5);
+  ivec2 tile = ivec2(t.x / n.x, t.y / n.y);
+  return ivec3(t.x - tile.x * n.x, t.y - tile.y * n.y, tile.y * tx + tile.x);
+}
+
+bool inGrid(ivec3 c) {
+  ivec3 n = gridSize();
+  return c.x >= 0 && c.y >= 0 && c.z >= 0 && c.x < n.x && c.y < n.y && c.z < n.z;
+}
+
+vec4 fetchCell(sampler2D s, ivec3 c) {
+  if (!inGrid(c)) return vec4(0.0);
+  return texelFetch(s, cellTexel(c), 0);
+}
+
+/** uv of a point inside one z-slice, clamped so bilinear taps never cross tiles. */
+vec2 sliceUV(vec2 xy, int z) {
+  int tx = int(uTiles.x + 0.5);
+  vec2 org = vec2(float(z - (z / tx) * tx) * uGrid.x, float(z / tx) * uGrid.y);
+  return (org + clamp(xy, vec2(0.5), uGrid.xy - 0.5)) / uAtlas;
+}
+
+/** Trilinear sample. p is in cell units - hardware does x and y, we do z. */
+vec2 sliceUVOf(vec2 xy, int z, vec3 g, vec2 tiles, vec2 atlas) {
+  int tx = int(tiles.x + 0.5);
+  vec2 org = vec2(float(z - (z / tx) * tx) * g.x, float(z / tx) * g.y);
+  return (org + clamp(xy, vec2(0.5), g.xy - 0.5)) / atlas;
+}
+
+/** Trilinear sample of a field with its own resolution (the coarse skip volume). */
+vec4 sampleAt(sampler2D s, vec3 p, vec3 g, vec2 tiles, vec2 atlas) {
+  float zc = clamp(p.z - 0.5, 0.0, g.z - 1.0);
+  int z0 = int(zc);
+  int z1 = min(z0 + 1, int(g.z) - 1);
+  return mix(texture(s, sliceUVOf(p.xy, z0, g, tiles, atlas)),
+             texture(s, sliceUVOf(p.xy, z1, g, tiles, atlas)), zc - float(z0));
+}
+
+vec4 sampleGrid(sampler2D s, vec3 p) { return sampleAt(s, p, uGrid, uTiles, uAtlas); }
+
+// ------------------------------------------------------------ material table
+uniform sampler2D uMat;
+vec4 matRow(int id, int row) { return texelFetch(uMat, ivec2(row, id), 0); }
+// row 0 density(rel) viscosity friction cohesion   | row 1 albedo.rgb glow
+// row 2 roughness metallic ior transmission        | row 3 liquid granular gas rigid
+// row 4 meltAt meltInto freezeAt freezeInto        | row 5 boilAt boilInto burnAt burnInto
+// row 6 absorb.rgb thermalDiffusivity              | row 7 life expiresInto surfaceTension startTemp
+
+// ------------------------------------------------------------------- hashing
+uint hashU(uint x) {
+  x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
+  return x;
+}
+float hash1(uint n) { return float(hashU(n) & 0x00ffffffu) / 16777216.0; }
+vec3 hash3(uint n) { return vec3(hash1(n), hash1(n + 1u), hash1(n + 2u)); }
+/** Uniform point on the sphere from two [0,1) numbers. */
+vec3 sphereDir(vec2 u) {
+  float z = 1.0 - 2.0 * u.x;
+  float r = sqrt(max(0.0, 1.0 - z * z));
+  float a = 2.0 * PI * u.y;
+  return vec3(r * cos(a), r * sin(a), z);
+}
+/** Cosine-weighted hemisphere sample around n - the correct density for Lambert. */
+vec3 cosineDir(vec3 n, vec2 u) {
+  vec3 d = sphereDir(u);
+  return normalize(n + d * 0.9999);
+}
+
+// ------------------------------------------------------- colour and radiance
+/** Planck's law along the Planckian locus, in linear sRGB, peak normalised to 1. */
+vec3 blackbody(float tempK) {
+  float t = clamp(tempK, 1000.0, 20000.0);
+  float u = (0.860117757 + 1.54118254e-4 * t + 1.28641212e-7 * t * t)
+          / (1.0 + 8.42420235e-4 * t + 7.08145163e-7 * t * t);
+  float v = (0.317398726 + 4.22806245e-5 * t + 4.20481691e-8 * t * t)
+          / (1.0 - 2.89741816e-5 * t + 1.61456053e-7 * t * t);
+  float d = 2.0 * u - 8.0 * v + 4.0;
+  float x = 3.0 * u / d;
+  float y = 2.0 * v / d;
+  vec3 XYZ = vec3(x / y, 1.0, (1.0 - x - y) / y);
+  mat3 toRGB = mat3( 3.2404542, -0.9692660,  0.0556434,
+                    -1.5371385,  1.8760108, -0.2040259,
+                    -0.4985314,  0.0415560,  1.0572252);
+  return max(toRGB * XYZ, vec3(0.0));
+}
+
+/** Stefan-Boltzmann: emitted radiance rises with the fourth power of temperature. */
+float thermalPower(float tempC) {
+  float k = max(tempC + T_ZERO_C, 0.0) / 1000.0;
+  return k * k * k * k;
+}
+
+vec3 acesFilm(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+vec3 toSRGB(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
+// -------------------------------------------------------------- microfacets
+/** Trowbridge-Reitz (GGX) normal distribution. */
+float D_GGX(float NoH, float a) {
+  float a2 = a * a;
+  float d = NoH * NoH * (a2 - 1.0) + 1.0;
+  return a2 / max(PI * d * d, 1e-7);
+}
+/** Height-correlated Smith visibility, already divided by 4 NoL NoV. */
+float V_SmithGGX(float NoV, float NoL, float a) {
+  float a2 = a * a;
+  float gv = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
+  float gl = NoV * sqrt(NoL * NoL * (1.0 - a2) + a2);
+  return 0.5 / max(gv + gl, 1e-7);
+}
+vec3 F_Schlick(vec3 f0, float u) {
+  float f = pow(1.0 - u, 5.0);
+  return f0 + (1.0 - f0) * f;
+}
+/** Exact unpolarised Fresnel for a dielectric - what water actually does. */
+float fresnelDielectric(float cosI, float eta) {
+  float s2 = eta * eta * (1.0 - cosI * cosI);
+  if (s2 > 1.0) return 1.0;                       // total internal reflection
+  float cosT = sqrt(1.0 - s2);
+  float rs = (eta * cosI - cosT) / (eta * cosI + cosT);
+  float rp = (cosI - eta * cosT) / (cosI + eta * cosT);
+  return clamp(0.5 * (rs * rs + rp * rp), 0.0, 1.0);
+}
+
+// ----------------------------------------------------------------------- sky
+uniform vec3 uSunDir;         // points towards the sun
+uniform vec3 uSunColour;      // radiance of the disc
+uniform float uSkyGain;
+uniform float uTurbidity;
+
+/** Cheap single-scattering sky: Rayleigh plus Mie against a ground bounce. */
+vec3 skyRadiance(vec3 dir) {
+  vec3 rayleigh = vec3(5.802, 13.558, 33.1) * 1e-3;
+  float up = clamp(dir.y, -1.0, 1.0);
+  float mu = clamp(dot(dir, uSunDir), -1.0, 1.0);
+  // Optical depth grows sharply towards the horizon.
+  float h = max(up, 0.0);
+  float depth = 1.0 / (h + 0.12);
+  float phaseR = 3.0 / (16.0 * PI) * (1.0 + mu * mu);
+  float g = 0.76 * clamp(uTurbidity, 0.0, 1.0);
+  float g2 = g * g;
+  float phaseM = (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * mu, 1.5));
+  vec3 col = rayleigh * depth * 60.0 * phaseR
+           + vec3(0.9, 0.92, 0.95) * depth * phaseM * (0.9 * uTurbidity + 0.06);
+  // Below the horizon we see the ground: a dim, desaturated bounce.
+  vec3 ground = vec3(0.13, 0.12, 0.11) * (0.35 + 0.65 * max(uSunDir.y, 0.0));
+  col = mix(ground, col, smoothstep(-0.06, 0.06, up));
+  col *= max(uSunDir.y * 0.85 + 0.15, 0.03);
+  return col * uSkyGain;
+}
+
+/** The sun disc itself, ~0.53 degrees across. */
+vec3 sunRadiance(vec3 dir) {
+  float c = dot(dir, uSunDir);
+  return uSunColour * smoothstep(0.99987, 0.99995, c) * 40.0;
+}
+
+/**
+ * Irradiance arriving on a surface facing n, from the sky dome plus the ground
+ * bounce. Two samples stand in for the hemisphere integral, so the constant is
+ * fitted rather than derived - it lands close to a proper cosine-weighted sum.
+ */
+vec3 skyIrradiance(vec3 n) {
+  vec3 up = skyRadiance(normalize(vec3(0.0, 1.0, 0.0) + n * 0.35));
+  vec3 side = skyRadiance(normalize(vec3(n.x, 0.18, n.z) + vec3(1e-4)));
+  return mix(side, up, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * PI * 0.95;
+}
+`;
+
+/* ---- 21-glsl-sim.js ---- */
+const P2G_VS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uPos, uVel, uAux, uC0, uC1, uC2;
+uniform ivec2 uPTex;
+uniform float uAffine;
+
+flat out vec4 vMom;    // momentum.xyz, mass
+flat out vec4 vHeat;   // rigid mass, mass*temperature, mass*viscosity, mass*sigma
+flat out vec4 vGran;   // fill fraction, granular mass, mass*friction, mass*cohesion
+
+void main() {
+  int pid = gl_VertexID >> 3;
+  int corner = gl_VertexID & 7;
+  ivec3 bit = ivec3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
+  ivec2 pt = ivec2(pid - (pid / uPTex.x) * uPTex.x, pid / uPTex.x);
+  vec4 P = texelFetch(uPos, pt, 0);
+  int mid = int(P.w + 0.5);
+
+  vec3 q = P.xyz - 0.5;
+  ivec3 base = ivec3(floor(q));
+  vec3 f = q - vec3(base);
+  ivec3 c = base + bit;
+  vec3 wv = mix(1.0 - f, f, vec3(bit));
+  float w = wv.x * wv.y * wv.z;
+
+  if (mid == 0 || !inGrid(c) || w < 1e-5) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);   // clipped away
+    gl_PointSize = 0.0;
+    vMom = vec4(0.0); vHeat = vec4(0.0); vGran = vec4(0.0);
+    return;
+  }
+
+  vec4 m0 = matRow(mid, 0);      // density, viscosity, friction, cohesion
+  vec4 m3 = matRow(mid, 3);      // liquid, granular, gas, rigid
+  vec4 m7 = matRow(mid, 7);      // life, expires, surface tension, start temp
+  vec4 V = texelFetch(uVel, pt, 0);
+  vec4 A = texelFetch(uAux, pt, 0);
+  float vol = max(A.w, 1e-3);
+  float mass = m0.x * vol;
+
+  // APIC: carry the local affine velocity field, not just the average. This is
+  // what keeps swirls alive instead of smearing them into the grid every step.
+  vec3 d = (vec3(c) + 0.5) - P.xyz;
+  vec3 r0 = texelFetch(uC0, pt, 0).xyz;
+  vec3 r1 = texelFetch(uC1, pt, 0).xyz;
+  vec3 r2 = texelFetch(uC2, pt, 0).xyz;
+  vec3 affine = vec3(dot(r0, d), dot(r1, d), dot(r2, d));
+  vec3 vel = V.xyz + uAffine * affine;
+
+  float wm = w * mass;
+  vMom  = vec4(wm * vel, wm);
+  vHeat = vec4(wm * m3.w, wm * V.w, wm * m0.y, wm * m7.z);
+  vGran = vec4(w * vol, wm * m3.y, wm * m0.z, wm * m0.w);
+
+  vec2 texel = vec2(cellTexel(c)) + 0.5;
+  gl_Position = vec4(texel / uAtlas * 2.0 - 1.0, 0.0, 1.0);
+  gl_PointSize = 1.0;
+}`;
+const P2G_FS = GLSL_HEAD + `
+flat in vec4 vMom;
+flat in vec4 vHeat;
+flat in vec4 vGran;
+layout(location = 0) out vec4 oMom;
+layout(location = 1) out vec4 oHeat;
+layout(location = 2) out vec4 oGran;
+void main() { oMom = vMom; oHeat = vHeat; oGran = vGran; }`;
+const GRID_PREP_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uMom, uHeat, uGran;
+uniform float uDt, uGravity, uAmbient, uDrag;
+layout(location = 0) out vec4 oVel;     // velocity.xyz, density
+layout(location = 1) out vec4 oPre;     // velocity as transferred, fill fraction
+layout(location = 2) out vec4 oAux;     // solid, temperature, viscosity, fill
+layout(location = 3) out vec4 oProp;    // granular fraction, friction, cohesion, sigma
+
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oVel = vec4(0.0); oPre = vec4(0.0); oAux = vec4(0.0); oProp = vec4(0.0); return; }
+
+  vec4 M = texelFetch(uMom, t, 0);
+  vec4 H = texelFetch(uHeat, t, 0);
+  vec4 G = texelFetch(uGran, t, 0);
+  float m = max(M.w, 0.0);
+  float inv = m > 1e-5 ? 1.0 / m : 0.0;
+
+  vec3 v = M.xyz * inv;
+  float temp = m > 1e-5 ? H.y * inv : uAmbient;
+  float visc = H.z * inv;
+  float sigma = H.w * inv;
+  float granular = G.y * inv;
+  float mu = G.z * inv;
+  float coh = G.w * inv;
+
+  // A cell is solid when it is mostly fixed material, or part of the box itself.
+  float solid = (m > 1e-5 && H.x * inv > 0.5) ? 1.0 : 0.0;
+  ivec3 n = gridSize();
+  if (c.x < 1 || c.y < 1 || c.z < 1 || c.x >= n.x - 1 || c.y >= n.y - 1 || c.z >= n.z - 1) solid = 1.0;
+
+  oPre = vec4(v, G.x);
+
+  if (m > 1e-5 && solid < 0.5) {
+    v.y -= uGravity * uDt;                       // weight
+    v *= max(0.0, 1.0 - uDrag * uDt);            // a little air resistance
+  } else if (solid > 0.5) {
+    v = vec3(0.0);
+  }
+
+  oVel = vec4(v, m);
+  oAux = vec4(solid, temp, visc, G.x);
+  oProp = vec4(granular, mu, coh, sigma);
+}`;
+const HEAT_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uAux;
+uniform float uDt, uDx, uAmbient, uHeatScale, uRadiate;
+out vec4 oAux;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oAux = vec4(0.0); return; }
+  vec4 A = texelFetch(uAux, t, 0);
+
+  // Conduction over a 2.5m box takes hours in real life, so the diffusivity is
+  // multiplied by uHeatScale to bring it onto a human timescale.
+  float alpha = 1.4e-5 * uHeatScale;
+  float k = clamp(alpha * uDt / (uDx * uDx), 0.0, 1.0 / 6.5);
+  float sum = 0.0;
+  for (int i = 0; i < 6; i++) {
+    ivec3 o = ivec3(i == 0 ? 1 : (i == 1 ? -1 : 0), i == 2 ? 1 : (i == 3 ? -1 : 0), i == 4 ? 1 : (i == 5 ? -1 : 0));
+    ivec3 d = c + o;
+    sum += inGrid(d) ? texelFetch(uAux, cellTexel(d), 0).y : A.y;
+  }
+  float temp = A.y + k * (sum - 6.0 * A.y);
+  // Anything much hotter than the room sheds heat to it (Newton plus a T^4 term).
+  float over = temp - uAmbient;
+  temp -= uRadiate * uDt * (over * 0.02 + sign(over) * thermalPower(temp) * 0.05);
+  oAux = vec4(A.x, temp, A.z, A.w);
+}`;
+const VISC_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uVel, uAux;
+uniform float uDt, uDx, uViscScale;
+out vec4 oVel;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oVel = vec4(0.0); return; }
+  vec4 V = texelFetch(uVel, t, 0);
+  vec4 A = texelFetch(uAux, t, 0);
+  if (A.x > 0.5 || V.w < 1e-5) { oVel = V; return; }
+  float k = clamp(A.z * uViscScale * uDt / (uDx * uDx), 0.0, 1.0 / 6.5);
+  if (k < 1e-6) { oVel = V; return; }
+  vec3 sum = vec3(0.0);
+  for (int i = 0; i < 6; i++) {
+    ivec3 o = ivec3(i == 0 ? 1 : (i == 1 ? -1 : 0), i == 2 ? 1 : (i == 3 ? -1 : 0), i == 4 ? 1 : (i == 5 ? -1 : 0));
+    ivec3 d = c + o;
+    vec4 N = fetchCell(uVel, d);
+    vec4 NA = fetchCell(uAux, d);
+    sum += (inGrid(d) && NA.x < 0.5 && N.w > 1e-5) ? N.xyz : V.xyz;
+  }
+  oVel = vec4(V.xyz + k * (sum - 6.0 * V.xyz), V.w);
+}`;
+const NORMAL_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uAux;
+out vec4 oNorm;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oNorm = vec4(0.0); return; }
+  float here = texelFetch(uAux, t, 0).w;
+  vec3 g;
+  g.x = fetchCell(uAux, c + ivec3(1, 0, 0)).w - fetchCell(uAux, c - ivec3(1, 0, 0)).w;
+  g.y = fetchCell(uAux, c + ivec3(0, 1, 0)).w - fetchCell(uAux, c - ivec3(0, 1, 0)).w;
+  g.z = fetchCell(uAux, c + ivec3(0, 0, 1)).w - fetchCell(uAux, c - ivec3(0, 0, 1)).w;
+  g *= 0.5;
+  float len = length(g);
+  oNorm = vec4(len > 1e-5 ? g / len : vec3(0.0), len);
+}`;
+const TENSION_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uVel, uAux, uProp, uNorm;
+uniform float uDt, uDx, uTension;
+out vec4 oVel;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oVel = vec4(0.0); return; }
+  vec4 V = texelFetch(uVel, t, 0);
+  vec4 A = texelFetch(uAux, t, 0);
+  vec4 N = texelFetch(uNorm, t, 0);
+  if (A.x > 0.5 || V.w < 1e-5 || N.w < 1e-4) { oVel = V; return; }
+  float sigma = texelFetch(uProp, t, 0).w * uTension;
+  if (sigma < 1e-6) { oVel = V; return; }
+  // curvature = -div(n)
+  float div = 0.5 * (
+      fetchCell(uNorm, c + ivec3(1, 0, 0)).x - fetchCell(uNorm, c - ivec3(1, 0, 0)).x
+    + fetchCell(uNorm, c + ivec3(0, 1, 0)).y - fetchCell(uNorm, c - ivec3(0, 1, 0)).y
+    + fetchCell(uNorm, c + ivec3(0, 0, 1)).z - fetchCell(uNorm, c - ivec3(0, 0, 1)).z);
+  float kappa = -div / uDx;
+  // rho here is relative to water, so dividing by it gives an acceleration.
+  vec3 f = sigma * kappa * N.xyz * N.w / uDx;
+  vec3 a = f / max(V.w, 0.05) / 998.0;
+  oVel = vec4(V.xyz + clamp(a * uDt, vec3(-4.0), vec3(4.0)), V.w);
+}`;
+const STRESS_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uVel, uAux, uProp, uPress;
+uniform float uDx, uGranular, uYieldFloor, uCohesion;
+layout(location = 0) out vec4 oT0;   // txx, tyy, tzz, txy
+layout(location = 1) out vec4 oT1;   // txz, tyz
+
+vec3 nbVel(ivec3 d, vec3 vc) {
+  if (!inGrid(d)) return vec3(0.0);                       // the box itself: static
+  if (fetchCell(uAux, d).x > 0.5) return vec3(0.0);       // fixed material: static
+  vec4 NV = fetchCell(uVel, d);
+  return NV.w < 1e-5 ? vc : NV.xyz;                       // open air: no shear
+}
+
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oT0 = vec4(0.0); oT1 = vec4(0.0); return; }
+  vec4 V = texelFetch(uVel, t, 0);
+  vec4 A = texelFetch(uAux, t, 0);
+  vec4 M = texelFetch(uProp, t, 0);
+  if (A.x > 0.5 || V.w < 1e-5 || M.x < 0.02) { oT0 = vec4(0.0); oT1 = vec4(0.0); return; }
+
+  vec3 dvdx = (nbVel(c + ivec3(1, 0, 0), V.xyz) - nbVel(c - ivec3(1, 0, 0), V.xyz)) / (2.0 * uDx);
+  vec3 dvdy = (nbVel(c + ivec3(0, 1, 0), V.xyz) - nbVel(c - ivec3(0, 1, 0), V.xyz)) / (2.0 * uDx);
+  vec3 dvdz = (nbVel(c + ivec3(0, 0, 1), V.xyz) - nbVel(c - ivec3(0, 0, 1), V.xyz)) / (2.0 * uDx);
+
+  // Rate of strain, with the volume change taken out.
+  float dxx = dvdx.x, dyy = dvdy.y, dzz = dvdz.z;
+  float dxy = 0.5 * (dvdy.x + dvdx.y);
+  float dxz = 0.5 * (dvdz.x + dvdx.z);
+  float dyz = 0.5 * (dvdz.y + dvdy.z);
+  float tr = (dxx + dyy + dzz) / 3.0;
+  dxx -= tr; dyy -= tr; dzz -= tr;
+  float mag = sqrt(max(0.5 * (dxx * dxx + dyy * dyy + dzz * dzz) + dxy * dxy + dxz * dxz + dyz * dyz, 0.0));
+
+  float p = max(texelFetch(uPress, t, 0).x, 0.0);
+  float yield = (M.y * p + M.z * uCohesion) * uGranular * clamp(M.x, 0.0, 1.0);
+  // Bounded by the yield either way, so the explicit update stays stable.
+  float k = yield / max(mag, uYieldFloor);
+  oT0 = vec4(dxx, dyy, dzz, dxy) * k;
+  oT1 = vec4(dxz, dyz, 0.0, 0.0) * k;
+}`;
+const PLASTIC_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uVel, uAux, uT0, uT1;
+uniform float uDt, uDx, uMaxAccel;
+out vec4 oVel;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oVel = vec4(0.0); return; }
+  vec4 V = texelFetch(uVel, t, 0);
+  vec4 A = texelFetch(uAux, t, 0);
+  if (A.x > 0.5 || V.w < 1e-5) { oVel = V; return; }
+
+  ivec3 ex = ivec3(1, 0, 0), ey = ivec3(0, 1, 0), ez = ivec3(0, 0, 1);
+  vec4 t0px = fetchCell(uT0, c + ex), t0mx = fetchCell(uT0, c - ex);
+  vec4 t0py = fetchCell(uT0, c + ey), t0my = fetchCell(uT0, c - ey);
+  vec4 t0pz = fetchCell(uT0, c + ez), t0mz = fetchCell(uT0, c - ez);
+  vec4 t1px = fetchCell(uT1, c + ex), t1mx = fetchCell(uT1, c - ex);
+  vec4 t1py = fetchCell(uT1, c + ey), t1my = fetchCell(uT1, c - ey);
+  vec4 t1pz = fetchCell(uT1, c + ez), t1mz = fetchCell(uT1, c - ez);
+  float h = 1.0 / (2.0 * uDx);
+
+  vec3 f;
+  f.x = (t0px.x - t0mx.x) * h + (t0py.w - t0my.w) * h + (t1pz.x - t1mz.x) * h;
+  f.y = (t0px.w - t0mx.w) * h + (t0py.y - t0my.y) * h + (t1pz.y - t1mz.y) * h;
+  f.z = (t1px.x - t1mx.x) * h + (t1py.y - t1my.y) * h + (t0pz.z - t0mz.z) * h;
+
+  vec3 a = clamp(f / max(V.w, 0.05), vec3(-uMaxAccel), vec3(uMaxAccel));
+  oVel = vec4(V.xyz + a * uDt, V.w);
+}`;
+const DIV_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uVel, uAux;
+uniform float uDx, uPack;
+out float oDiv;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oDiv = 0.0; return; }
+  vec4 V = texelFetch(uVel, t, 0);
+  vec4 A = texelFetch(uAux, t, 0);
+  if (A.x > 0.5 || V.w < 1e-5) { oDiv = 0.0; return; }
+
+  // A wall reflects: the face velocity there must be zero, so mirror our own.
+  #define FLUX(off, comp) ( (!inGrid(c + (off)) || fetchCell(uAux, c + (off)).x > 0.5) \
+      ? -V.comp : fetchCell(uVel, c + (off)).comp )
+  float d = 0.5 * (
+      FLUX(ivec3( 1, 0, 0), x) - FLUX(ivec3(-1, 0, 0), x)
+    + FLUX(ivec3( 0, 1, 0), y) - FLUX(ivec3( 0,-1, 0), y)
+    + FLUX(ivec3( 0, 0, 1), z) - FLUX(ivec3( 0, 0,-1), z)) / uDx;
+  #undef FLUX
+  // Nudge over-packed cells apart. Without this, FLIP slowly loses volume and
+  // particles clump into strings.
+  // Cap the correction: a cell that has momentarily gone six times over would
+  // otherwise be blown apart hard enough to throw the whole heap across the box.
+  float excess = min(max(A.w - 1.0, 0.0), 1.0);
+  oDiv = d - uPack * excess;
+}`;
+const PRESSURE_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uPress, uVel, uAux, uDiv;
+uniform float uDt, uDx;
+uniform int uParity;
+out float oPress;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oPress = 0.0; return; }
+  float old = texelFetch(uPress, t, 0).x;
+  // Red-black Gauss-Seidel: half the cells per pass, so each pass already sees
+  // its neighbours' new values. Converges about twice as fast as Jacobi.
+  if (((c.x + c.y + c.z) & 1) != uParity) { oPress = old; return; }
+
+  vec4 V = texelFetch(uVel, t, 0);
+  vec4 A = texelFetch(uAux, t, 0);
+  if (A.x > 0.5 || V.w < 1e-5) { oPress = 0.0; return; }
+
+  float rhoC = max(V.w, 0.04);
+  float sum = 0.0, diag = 0.0;
+  for (int i = 0; i < 6; i++) {
+    ivec3 o = ivec3(i == 0 ? 1 : (i == 1 ? -1 : 0), i == 2 ? 1 : (i == 3 ? -1 : 0), i == 4 ? 1 : (i == 5 ? -1 : 0));
+    ivec3 d = c + o;
+    if (!inGrid(d)) continue;
+    vec4 NA = fetchCell(uAux, d);
+    if (NA.x > 0.5) continue;                       // solid: no flux, no term
+    vec4 NV = fetchCell(uVel, d);
+    float k = 2.0 / (rhoC + max(NV.w, 0.04));       // 1 / density at the face
+    diag += k;
+    if (NV.w >= 1e-5) sum += k * texelFetch(uPress, cellTexel(d), 0).x;  // else air, p = 0
+  }
+  if (diag < 1e-6) { oPress = 0.0; return; }
+  float p = (sum - texelFetch(uDiv, t, 0).x * uDx * uDx / uDt) / diag;
+  // Liquids and grains push but never pull, so pressure stays positive.
+  oPress = max(p, 0.0);
+}`;
+const PROJECT_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uVel, uAux, uPress;
+uniform float uDt, uDx;
+out vec4 oVel;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oVel = vec4(0.0); return; }
+  vec4 V = texelFetch(uVel, t, 0);
+  vec4 A = texelFetch(uAux, t, 0);
+  if (A.x > 0.5) { oVel = vec4(0.0, 0.0, 0.0, V.w); return; }
+  if (V.w < 1e-5) { oVel = V; return; }
+  float p = texelFetch(uPress, t, 0).x;
+  // A solid neighbour contributes no gradient, which is the no-flux condition.
+  #define PR(off) ( (!inGrid(c + (off)) || fetchCell(uAux, c + (off)).x > 0.5) \
+      ? p : texelFetch(uPress, cellTexel(c + (off)), 0).x )
+  vec3 grad = 0.5 * vec3(
+      PR(ivec3( 1, 0, 0)) - PR(ivec3(-1, 0, 0)),
+      PR(ivec3( 0, 1, 0)) - PR(ivec3( 0,-1, 0)),
+      PR(ivec3( 0, 0, 1)) - PR(ivec3( 0, 0,-1))) / uDx;
+  #undef PR
+  oVel = vec4(V.xyz - uDt * grad / max(V.w, 0.04), V.w);
+}`;
+const EXTRAP_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uVel, uAux;
+out vec4 oVel;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oVel = vec4(0.0); return; }
+  vec4 V = texelFetch(uVel, t, 0);
+  if (V.w >= 1e-5) { oVel = V; return; }
+  vec3 sum = vec3(0.0);
+  float n = 0.0;
+  for (int i = 0; i < 6; i++) {
+    ivec3 o = ivec3(i == 0 ? 1 : (i == 1 ? -1 : 0), i == 2 ? 1 : (i == 3 ? -1 : 0), i == 4 ? 1 : (i == 5 ? -1 : 0));
+    vec4 N = fetchCell(uVel, c + o);
+    if (N.w >= 1e-5) { sum += N.xyz; n += 1.0; }
+  }
+  oVel = vec4(n > 0.5 ? sum / n : V.xyz, V.w);
+}`;
+
+/* ---- 22-glsl-particles.js ---- */
+const TOOL = { DRAW: 0, ERASE: 1, DRAG: 2, PUSH: 3, HEAT: 4 };
+const GLSL_PARTICLE_HEAD = `
+uniform ivec2 uPTex;
+ivec2 pTexel(int i) { return ivec2(i - (i / uPTex.x) * uPTex.x, i / uPTex.x); }
+int pIndex(ivec2 t) { return t.y * uPTex.x + t.x; }
+`;
+const G2P_FS = GLSL_HEAD + GLSL_COMMON + GLSL_PARTICLE_HEAD + `
+uniform sampler2D uPos, uVel, uAux;
+uniform sampler2D uGVel, uGPre, uGAux, uGPress;
+uniform float uDt, uDx, uGravity, uAmbient, uFlip, uBuoyancy, uLatent, uHeatCouple;
+uniform float uRestitution, uWallFriction, uPackLimit, uSeparate;
+uniform float uGranular, uPressFloor, uFricCap, uCohesionAccel;
+uniform vec3 uBrushPos, uBrushVel;
+uniform float uBrushRadius, uBrushStrength;
+uniform int uBrushTool, uBrushOn;
+uniform uint uSeed;
+
+layout(location = 0) out vec4 oPos;
+layout(location = 1) out vec4 oVel;
+layout(location = 2) out vec4 oAux;
+
+/** Solid fraction (x) and how full the cell is (w), sampled smoothly. */
+vec2 fieldAt(vec3 p) { vec4 g = sampleGrid(uGAux, p); return vec2(g.x, g.w); }
+
+void main() {
+  ivec2 pt = ivec2(gl_FragCoord.xy);
+  vec4 P = texelFetch(uPos, pt, 0);
+  vec4 V = texelFetch(uVel, pt, 0);
+  vec4 A = texelFetch(uAux, pt, 0);
+  int mid = int(P.w + 0.5);
+  if (mid == 0) { oPos = vec4(P.xyz, 0.0); oVel = V; oAux = A; return; }
+
+  vec4 m0 = matRow(mid, 0);
+  vec4 m3 = matRow(mid, 3);
+  vec4 m4 = matRow(mid, 4);
+  vec4 m5 = matRow(mid, 5);
+  vec4 m7 = matRow(mid, 7);
+  vec4 m8 = matRow(mid, 8);
+  bool rigid = m3.w > 0.5;
+  bool gas = m3.z > 0.5;
+
+  vec3 p = P.xyz;
+  // Anything fixed stays put, and forgets whatever it was doing before it set.
+  vec3 v = rigid ? vec3(0.0) : V.xyz;
+  float temp = V.w;
+
+  // ---- heat: swap with the cell we sit in, then hold or shed our own
+  float gridT = sampleGrid(uGAux, p).y;
+  temp = mix(temp, gridT, clamp(uHeatCouple * uDt, 0.0, 1.0));
+  if (m8.y > 0.0) temp = mix(temp, m8.x, clamp(m8.y * uDt, 0.0, 1.0));
+
+  if (!rigid) {
+    // ---- gather velocity: FLIP keeps the detail, PIC keeps it stable
+    vec3 vPic = sampleGrid(uGVel, p).xyz;
+    vec3 vPre = sampleGrid(uGPre, p).xyz;
+    vec3 vFlip = v + (vPic - vPre);
+    // Thick liquids lean towards PIC, which is where their damping comes from.
+    float flip = uFlip * exp(-m0.y * 400.0);
+    v = mix(vPic, vFlip, clamp(flip, 0.0, 1.0));
+
+    // ---- buoyancy (Boussinesq). Gases expand far more than liquids do.
+    float beta = gas ? 1.0 / (uAmbient + T_ZERO_C) : 2.1e-4;
+    v.y += uBuoyancy * uGravity * beta * (temp - uAmbient) * uDt;
+
+    // ---- Coulomb friction for grains.
+    // A grain is held by friction proportional to the weight pressing on it, so
+    // deep grains lock solid while the ones on the surface are free to run. The
+    // small floor term is the grain's own weight, which is what stops a slope
+    // steeper than atan(mu) from creeping away one speck at a time.
+    if (m3.y > 0.5 && uGranular > 0.0) {
+      // Coulomb friction needs a normal force, and the honest measure of it is how
+      // much of gravity the grid just cancelled for this grain: something in free
+      // fall keeps the whole of g and is held by nothing, something resting on a
+      // heap keeps none of it and is gripped hard. On a slope it lands in between,
+      // which is exactly why a heap stops at its angle of repose.
+      float supported = clamp(1.0 - (V.y - v.y) / max(uGravity * uDt, 1e-6), 0.0, 1.0);
+      float press = max(sampleGrid(uGPress, p).x, 0.0);
+      float stop = (m0.z * (press + uPressFloor * supported) / (max(m0.x, 0.05) * uDx) * uGranular
+                 + m0.w * uCohesionAccel * (0.25 + 0.75 * supported)) * supported;
+      float drop = min(stop, uFricCap) * uDt;
+      float sp = length(v);
+      if (sp > 1e-5) v *= max(0.0, 1.0 - drop / sp);
+    }
+  }
+
+  // ---- the brush
+  if (uBrushOn == 1) {
+    float d = length(p - uBrushPos);
+    float fall = 1.0 - smoothstep(uBrushRadius * 0.25, uBrushRadius, d);
+    if (fall > 0.0) {
+      if (uBrushTool == 1 && d < uBrushRadius) { mid = 0; }
+      else if (uBrushTool == 2 && !rigid) v += (uBrushVel - v) * min(1.0, fall * uBrushStrength * uDt * 26.0);
+      else if (uBrushTool == 3 && !rigid) {
+        vec3 dir = d > 1e-4 ? (p - uBrushPos) / d : vec3(0.0, 1.0, 0.0);
+        v += dir * fall * uBrushStrength * uDt * 90.0;
+      } else if (uBrushTool == 4) temp += uBrushStrength * fall * uDt * 1400.0;
+    }
+  }
+  if (mid == 0) { oPos = vec4(p, 0.0); oVel = vec4(0.0); oAux = A; return; }
+
+  if (!rigid) {
+    // ---- move (midpoint rule, so a particle curving round an obstacle keeps up)
+    vec3 mid1 = p + v * (0.5 * uDt / uDx);
+    vec3 k2 = sampleGrid(uGVel, clamp(mid1, vec3(0.5), uGrid - 0.5)).xyz;
+    vec3 step = mix(v, k2, 0.5) * (uDt / uDx);
+    // Never cross more than one cell per step: that is the CFL condition.
+    float sl = length(step);
+    if (sl > 1.0) step *= 1.0 / sl;
+    vec3 prev = p;
+    p += step;
+
+    // ---- the walls of the box. The margin keeps a speck's whole splat stencil
+    // inside the fluid cells; any closer and half its mass lands in the wall and
+    // is thrown away, which the solver reads as the box being emptier than it is.
+    vec3 lo = vec3(1.55), hi = uGrid - 1.55;
+    if (p.x < lo.x) { p.x = lo.x; v.x = max(v.x, -v.x * uRestitution); v *= uWallFriction; }
+    if (p.x > hi.x) { p.x = hi.x; v.x = min(v.x, -v.x * uRestitution); v *= uWallFriction; }
+    if (p.y < lo.y) { p.y = lo.y; v.y = max(v.y, -v.y * uRestitution); v *= uWallFriction; }
+    if (p.y > hi.y) { p.y = hi.y; v.y = min(v.y, -v.y * uRestitution); v *= uWallFriction; }
+    if (p.z < lo.z) { p.z = lo.z; v.z = max(v.z, -v.z * uRestitution); v *= uWallFriction; }
+    if (p.z > hi.z) { p.z = hi.z; v.z = min(v.z, -v.z * uRestitution); v *= uWallFriction; }
+
+    // ---- anything fixed in the way, and anywhere too many specks have piled up
+    vec2 here = fieldAt(p);
+    vec2 px = fieldAt(p + vec3(1.0, 0.0, 0.0)), mx = fieldAt(p - vec3(1.0, 0.0, 0.0));
+    vec2 py = fieldAt(p + vec3(0.0, 1.0, 0.0)), my = fieldAt(p - vec3(0.0, 1.0, 0.0));
+    vec2 pz = fieldAt(p + vec3(0.0, 0.0, 1.0)), mz = fieldAt(p - vec3(0.0, 0.0, 1.0));
+    if (here.x > 0.35) {
+      vec3 g = vec3(px.x - mx.x, py.x - my.x, pz.x - mz.x);
+      float gl = length(g);
+      vec3 n = gl > 1e-4 ? -g / gl : normalize(prev - p + vec3(0.0, 1e-3, 0.0));
+      p += n * (here.x - 0.3) * 1.2;
+      float vn = dot(v, n);
+      if (vn < 0.0) {
+        vec3 vt = v - n * vn;
+        v = vt * uWallFriction - n * vn * uRestitution;
+      }
+    }
+    // A direct nudge down the density gradient. The pressure solve alone cannot
+    // undo the crowding that happens in a single violent step, and crowded cells
+    // make the anti-clumping term overreact.
+    float over = here.y - uPackLimit;
+    if (over > 0.0) {
+      vec3 gd = vec3(px.y - mx.y, py.y - my.y, pz.y - mz.y);
+      float gl = length(gd);
+      // A gentle drift, measured per second: any faster and it churns a settled
+      // heap instead of quietly relieving the crowding.
+      if (gl > 1e-4) p -= (gd / gl) * min(over, 1.0) * uSeparate * uDt;
+    }
+    p = clamp(p, vec3(1.55), uGrid - 1.55);
+  }
+
+  // ---- change of state, held back by a dwell time that stands in for latent heat
+  int target = -1;
+  if (temp > m5.z) target = int(m5.w + 0.5);
+  else if (temp > m5.x) target = int(m5.y + 0.5);
+  else if (temp > m4.x) target = int(m4.y + 0.5);
+  else if (temp < m4.z) target = int(m4.w + 0.5);
+  float rate = uDt / max(uLatent, 0.02);
+  float prog = target >= 0 ? A.z + rate : max(0.0, A.z - rate * 0.7);
+  if (target >= 0 && prog >= 1.0) {
+    mid = target;
+    prog = 0.0;
+    A.x = matRow(mid, 7).x;
+  }
+
+  // ---- things that only last so long
+  vec4 life = matRow(mid, 7);
+  if (life.x > 0.0) {
+    A.x -= uDt;
+    if (A.x <= 0.0) { mid = int(life.y + 0.5); A.x = matRow(mid, 7).x; }
+  }
+
+  oPos = vec4(p, float(mid));
+  oVel = vec4(v, temp);
+  oAux = vec4(A.x, A.y, prog, A.w);
+}`;
+const G2P_C_FS = GLSL_HEAD + GLSL_COMMON + GLSL_PARTICLE_HEAD + `
+uniform sampler2D uPos, uGVel;
+uniform float uCClamp;
+layout(location = 0) out vec4 oC0;
+layout(location = 1) out vec4 oC1;
+layout(location = 2) out vec4 oC2;
+void main() {
+  ivec2 pt = ivec2(gl_FragCoord.xy);
+  vec4 P = texelFetch(uPos, pt, 0);
+  if (int(P.w + 0.5) == 0) { oC0 = vec4(0.0); oC1 = vec4(0.0); oC2 = vec4(0.0); return; }
+  vec3 p = clamp(P.xyz, vec3(0.6), uGrid - 0.6);
+  vec3 dvdx = sampleGrid(uGVel, p + vec3(0.5, 0.0, 0.0)).xyz - sampleGrid(uGVel, p - vec3(0.5, 0.0, 0.0)).xyz;
+  vec3 dvdy = sampleGrid(uGVel, p + vec3(0.0, 0.5, 0.0)).xyz - sampleGrid(uGVel, p - vec3(0.0, 0.5, 0.0)).xyz;
+  vec3 dvdz = sampleGrid(uGVel, p + vec3(0.0, 0.0, 0.5)).xyz - sampleGrid(uGVel, p - vec3(0.0, 0.0, 0.5)).xyz;
+  vec3 r0 = vec3(dvdx.x, dvdy.x, dvdz.x);
+  vec3 r1 = vec3(dvdx.y, dvdy.y, dvdz.y);
+  vec3 r2 = vec3(dvdx.z, dvdy.z, dvdz.z);
+  oC0 = vec4(clamp(r0, -uCClamp, uCClamp), 0.0);
+  oC1 = vec4(clamp(r1, -uCClamp, uCClamp), 0.0);
+  oC2 = vec4(clamp(r2, -uCClamp, uCClamp), 0.0);
+}`;
+const EMIT_VS = GLSL_HEAD + GLSL_COMMON + GLSL_PARTICLE_HEAD + `
+uniform int uBase, uRingStart, uRingSize;
+uniform vec3 uSpawnPos, uSpawnVel;
+uniform float uSpawnRadius, uSpawnTemp, uSpawnVolume, uJitter;
+uniform int uSpawnMat;
+uniform uint uSeed;
+flat out vec4 vPos;
+flat out vec4 vVel;
+flat out vec4 vAux;
+void main() {
+  // Wrap inside the ring only: the slots below uRingStart hold fixed scenery.
+  int size = max(uRingSize, 1);
+  int rel = (uBase - uRingStart) + gl_VertexID;
+  int slot = uRingStart + (rel - (rel / size) * size);
+  uint h = hashU(uint(gl_VertexID) * 2654435761u + uSeed);
+  vec3 r = hash3(h);
+  // Cube-root of a uniform number spreads points evenly through the ball.
+  vec3 dir = sphereDir(r.xy);
+  float rad = uSpawnRadius * pow(max(hash1(h + 91u), 1e-4), 0.3333333);
+  vec3 p = uSpawnPos + dir * rad;
+  if (any(lessThan(p, vec3(1.1))) || any(greaterThan(p, uGrid - 1.1))) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vPos = vec4(0.0); vVel = vec4(0.0); vAux = vec4(0.0);
+    return;
+  }
+  vPos = vec4(p, float(uSpawnMat));
+  vVel = vec4(uSpawnVel + (hash3(h + 41u) - 0.5) * uJitter, uSpawnTemp);
+  vAux = vec4(matRow(uSpawnMat, 7).x, hash1(h + 17u), 0.0, uSpawnVolume);
+  vec2 texel = vec2(pTexel(slot)) + 0.5;
+  gl_Position = vec4(texel / vec2(uPTex) * 2.0 - 1.0, 0.0, 1.0);
+  gl_PointSize = 1.0;
+}`;
+const EMIT_FS = GLSL_HEAD + `
+flat in vec4 vPos;
+flat in vec4 vVel;
+flat in vec4 vAux;
+layout(location = 0) out vec4 oPos;
+layout(location = 1) out vec4 oVel;
+layout(location = 2) out vec4 oAux;
+void main() { oPos = vPos; oVel = vVel; oAux = vAux; }`;
+/** New particles start with no affine field of their own. */
+const EMIT_ZERO_FS = GLSL_HEAD + `
+flat in vec4 vPos;
+flat in vec4 vVel;
+flat in vec4 vAux;
+layout(location = 0) out vec4 oC0;
+layout(location = 1) out vec4 oC1;
+layout(location = 2) out vec4 oC2;
+void main() { oC0 = vec4(0.0); oC1 = vec4(0.0); oC2 = vec4(0.0); }`;
+const RSPLAT_VS = GLSL_HEAD + GLSL_COMMON + GLSL_PARTICLE_HEAD + `
+uniform sampler2D uPos, uVel, uAux;
+flat out vec4 vA;   // albedo.rgb * w, w
+flat out vec4 vB;   // roughness, metallic, transmission, ior  (condensed only)
+flat out vec4 vC;   // absorb.rgb, glow
+flat out vec4 vD;   // condensed fill, granular fill, gas fill, temperature * w
+void main() {
+  int pid = gl_VertexID >> 3;
+  int corner = gl_VertexID & 7;
+  ivec3 bit = ivec3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
+  ivec2 pt = pTexel(pid);
+  vec4 P = texelFetch(uPos, pt, 0);
+  int mid = int(P.w + 0.5);
+  vec3 q = P.xyz - 0.5;
+  ivec3 base = ivec3(floor(q));
+  vec3 f = q - vec3(base);
+  ivec3 c = base + bit;
+  vec3 wv = mix(1.0 - f, f, vec3(bit));
+  float w = wv.x * wv.y * wv.z;
+  if (mid == 0 || !inGrid(c) || w < 1e-5) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vA = vec4(0.0); vB = vec4(0.0); vC = vec4(0.0); vD = vec4(0.0);
+    return;
+  }
+  vec4 m1 = matRow(mid, 1);
+  vec4 m2 = matRow(mid, 2);
+  vec4 m3 = matRow(mid, 3);
+  vec4 m6 = matRow(mid, 6);
+  vec4 V = texelFetch(uVel, pt, 0);
+  vec4 A = texelFetch(uAux, pt, 0);
+  float vol = w * max(A.w, 1e-3);
+  float cond = vol * (1.0 - m3.z);          // everything that is not a gas
+
+  vA = vec4(m1.rgb * vol, vol);
+  vB = vec4(m2.x, m2.y, m2.w, m2.z) * cond;
+  vC = vec4(m6.rgb * cond, m1.a * vol);
+  vD = vec4(cond, m3.y * vol, m3.z * vol, V.w * vol);
+
+  vec2 texel = vec2(cellTexel(c)) + 0.5;
+  gl_Position = vec4(texel / uAtlas * 2.0 - 1.0, 0.0, 1.0);
+  gl_PointSize = 1.0;
+}`;
+const RSPLAT_FS = GLSL_HEAD + `
+flat in vec4 vA;
+flat in vec4 vB;
+flat in vec4 vC;
+flat in vec4 vD;
+layout(location = 0) out vec4 oA;
+layout(location = 1) out vec4 oB;
+layout(location = 2) out vec4 oC;
+layout(location = 3) out vec4 oD;
+void main() { oA = vA; oB = vB; oC = vC; oD = vD; }`;
+/** One axis of a [1 2 1] blur, run three times to soften the fields into a surface. */
+const RBLUR_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uA, uB, uC, uD;
+uniform ivec3 uStep;
+layout(location = 0) out vec4 oA;
+layout(location = 1) out vec4 oB;
+layout(location = 2) out vec4 oC;
+layout(location = 3) out vec4 oD;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oA = vec4(0.0); oB = vec4(0.0); oC = vec4(0.0); oD = vec4(0.0); return; }
+  ivec3 lo = c - uStep, hi = c + uStep;
+  oA = 0.25 * (fetchCell(uA, lo) + 2.0 * texelFetch(uA, t, 0) + fetchCell(uA, hi));
+  oB = 0.25 * (fetchCell(uB, lo) + 2.0 * texelFetch(uB, t, 0) + fetchCell(uB, hi));
+  oC = 0.25 * (fetchCell(uC, lo) + 2.0 * texelFetch(uC, t, 0) + fetchCell(uC, hi));
+  oD = 0.25 * (fetchCell(uD, lo) + 2.0 * texelFetch(uD, t, 0) + fetchCell(uD, hi));
+}`;
+
+/* ---- 23-glsl-render.js ---- */
+const COARSE_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uSrc;
+uniform vec3 uCGrid;
+uniform vec2 uCTiles;
+uniform float uScale;
+out vec4 oMax;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 g = ivec3(uCGrid + 0.5);
+  int tx = int(uCTiles.x + 0.5);
+  ivec2 tile = ivec2(t.x / g.x, t.y / g.y);
+  ivec3 c = ivec3(t.x - tile.x * g.x, t.y - tile.y * g.y, tile.y * tx + tile.x);
+  if (c.z >= g.z) { oMax = vec4(0.0); return; }
+  int s = int(uScale + 0.5);
+  ivec3 lo = c * s - 1;
+  float best = 0.0;
+  for (int z = 0; z < 8; z++) {
+    if (z > s + 1) break;
+    for (int y = 0; y < 8; y++) {
+      if (y > s + 1) break;
+      for (int x = 0; x < 8; x++) {
+        if (x > s + 1) break;
+        vec4 v = fetchCell(uSrc, lo + ivec3(x, y, z));
+        best = max(best, max(v.x, v.z));   // condensed or gas
+      }
+    }
+  }
+  oMax = vec4(best);
+}`;
+const RAY_LIB = `
+uniform sampler2D uFA, uFB, uFC, uFD;    // albedo/fill, surface, absorption, phases
+uniform sampler2D uCoarse, uCaustic;
+uniform vec3 uCGrid;
+uniform vec2 uCTiles, uCAtlas;
+uniform float uCoarseScale;
+uniform float uIso, uDx, uClarity, uShadowSigma, uGasSigma, uGlowGain, uFloorY;
+uniform int uDoShadows, uDoReflect, uDoRefract, uDoCaustics, uDoGas;
+uniform int uSurfSteps, uShadowSteps;
+uniform float uSurfStep;
+uniform uint uFrameSeed;
+
+struct Surf {
+  vec3 albedo; float rough; float metal; float trans; float ior;
+  vec3 absorb; float glow; float temp;
+};
+
+float fillAt(vec3 p) { return sampleGrid(uFD, p).x; }
+float gasAt(vec3 p) { return sampleGrid(uFD, p).z; }
+
+float coarseMax(vec3 p) {
+  ivec3 g = ivec3(uCGrid + 0.5);
+  ivec3 c = ivec3(floor(p / uCoarseScale));
+  // Outside the box there is nothing, and saying so keeps a shadow the shape of
+  // what casts it rather than the shape of the box.
+  if (any(lessThan(c, ivec3(0))) || any(greaterThanEqual(c, g))) return 0.0;
+  int tx = int(uCTiles.x + 0.5);
+  return texelFetch(uCoarse, ivec2((c.z - (c.z / tx) * tx) * g.x + c.x, (c.z / tx) * g.y + c.y), 0).x;
+}
+
+/** How far until the ray leaves the coarse block it is standing in. */
+float blockExit(vec3 p, vec3 rd) {
+  float C = uCoarseScale;
+  vec3 cell = floor(p / C) * C;
+  vec3 d = mix(p - cell, cell + C - p, step(0.0, rd)) / max(abs(rd), vec3(1e-6));
+  return max(min(d.x, min(d.y, d.z)), 0.0) + 1e-3;
+}
+
+vec2 boxRange(vec3 ro, vec3 rd, vec3 lo, vec3 hi) {
+  vec3 inv = 1.0 / (rd + vec3(equal(rd, vec3(0.0))) * 1e-9);
+  vec3 a = (lo - ro) * inv;
+  vec3 b = (hi - ro) * inv;
+  vec3 tmin = min(a, b), tmax = max(a, b);
+  return vec2(max(max(tmin.x, tmin.y), tmin.z), min(min(tmax.x, tmax.y), tmax.z));
+}
+
+// The floor of the box is opaque, so nothing is ever traced below it.
+vec3 boxLo() { return vec3(0.75, uFloorY, 0.75); }
+vec3 boxHi() { return uGrid - 0.75; }
+
+Surf surfAt(vec3 p) {
+  vec4 A = sampleGrid(uFA, p);
+  vec4 B = sampleGrid(uFB, p);
+  vec4 C = sampleGrid(uFC, p);
+  vec4 D = sampleGrid(uFD, p);
+  float w = max(A.w, 1e-4);
+  float cd = max(D.x, 1e-4);
+  Surf s;
+  s.albedo = clamp(A.rgb / w, 0.0, 1.0);
+  s.rough = clamp(B.x / cd, 0.045, 1.0);
+  s.metal = clamp(B.y / cd, 0.0, 1.0);
+  s.trans = clamp(B.z / cd, 0.0, 1.0);
+  s.ior = clamp(B.w / cd, 1.0, 2.5);
+  s.absorb = max(C.rgb / cd, vec3(0.0));
+  s.glow = max(C.w / w, 0.0);
+  s.temp = D.w / w;
+  return s;
+}
+
+/** Outward normal from the gradient of the fill fraction (tetrahedron taps). */
+vec3 normalAt(vec3 p) {
+  const vec2 k = vec2(1.0, -1.0);
+  float h = 0.75;
+  vec3 g = k.xyy * fillAt(p + k.xyy * h) + k.yyx * fillAt(p + k.yyx * h)
+         + k.yxy * fillAt(p + k.yxy * h) + k.xxx * fillAt(p + k.xxx * h);
+  float l = length(g);
+  return l > 1e-6 ? -g / l : vec3(0.0, 1.0, 0.0);
+}
+
+struct Hit { bool hit; float t; };
+
+/** Walk until the fill fraction crosses the surface, then bisect onto it. */
+Hit marchSurface(vec3 ro, vec3 rd, float t0, float t1) {
+  Hit h;
+  h.hit = false;
+  h.t = t1;
+  float t = t0;
+  for (int i = 0; i < 512; i++) {
+    if (i >= uSurfSteps || t >= t1) break;
+    vec3 p = ro + rd * t;
+    if (coarseMax(p) < uIso) { t += blockExit(p, rd); continue; }
+    float nt = min(t + uSurfStep, t1);
+    if (fillAt(ro + rd * nt) >= uIso) {
+      float a = t, b = nt;
+      for (int k = 0; k < 6; k++) {
+        float m = 0.5 * (a + b);
+        if (fillAt(ro + rd * m) >= uIso) b = m; else a = m;
+      }
+      h.hit = true;
+      h.t = b;
+      return h;
+    }
+    t = nt;
+  }
+  return h;
+}
+
+/**
+ * How much sunlight survives the journey from p up to the sky, per colour.
+ * Opaque material simply blocks; clear material absorbs by Beer-Lambert over the
+ * distance actually travelled, which is why the floor under water is lit blue-green
+ * rather than being in pitch darkness.
+ */
+vec3 sunVisibility(vec3 p) {
+  if (uDoShadows == 0) return vec3(1.0);
+  vec3 rd = uSunDir;
+  // Skip straight to where the ray meets the box; a point on the floor well
+  // outside it would otherwise spend its whole step budget crossing open ground.
+  vec2 br = boxRange(p, rd, boxLo(), boxHi());
+  float t1 = br.y;
+  float t = max(br.x, 0.9);
+  if (t1 <= t) return vec3(1.0);
+  vec3 trans = vec3(1.0);
+  float dt = 0.85;
+  for (int i = 0; i < 192; i++) {
+    if (i >= uShadowSteps || t >= t1) break;
+    vec3 q = p + rd * t;
+    if (coarseMax(q) < uIso * 0.4) { t += blockExit(q, rd); continue; }
+    vec4 D = sampleGrid(uFD, q);
+    if (D.x + D.z > 1e-3) {
+      float cd = max(D.x, 1e-4);
+      float clear = clamp(sampleGrid(uFB, q).z / cd, 0.0, 1.0);
+      vec3 absorb = max(sampleGrid(uFC, q).rgb / cd, vec3(0.0));
+      float blocked = D.x * (1.0 - clear) * uShadowSigma + D.z * uGasSigma * 0.5;
+      vec3 soaked = absorb * D.x * clear * uDx * uClarity;
+      trans *= exp(-(vec3(blocked) + soaked) * dt);
+      if (max(trans.r, max(trans.g, trans.b)) < 0.01) return vec3(0.0);
+    }
+    t += dt;
+  }
+  return trans;
+}
+
+/** Extra sunlight focused onto this point by the water above it. */
+float causticAt(vec3 p) {
+  if (uDoCaustics == 0) return 0.0;
+  return max(sampleGrid(uCaustic, p).x, 0.0);
+}
+
+/** Light emitted because the material is hot, straight from Planck's law. */
+vec3 emissionOf(Surf s) {
+  if (s.glow < 1e-3 || s.temp < 420.0) return vec3(0.0);
+  float k = smoothstep(420.0, 700.0, s.temp);
+  return blackbody(s.temp + T_ZERO_C) * thermalPower(s.temp) * s.glow * k * uGlowGain;
+}
+
+vec3 fresnel0(Surf s) {
+  float f = (s.ior - 1.0) / (s.ior + 1.0);
+  return mix(vec3(f * f), s.albedo, s.metal);
+}
+
+/** Cook-Torrance for one light, plus the sky as an ambient dome. */
+vec3 shadeDirect(Surf s, vec3 n, vec3 v, vec3 vis, float caustic) {
+  vec3 f0 = fresnel0(s);
+  vec3 diffuseCol = s.albedo * (1.0 - s.metal);
+  vec3 l = uSunDir;
+  float NoL = max(dot(n, l), 0.0);
+  float NoV = max(dot(n, v), 1e-4);
+  vec3 col = vec3(0.0);
+  if (NoL > 0.0 && max(vis.r, max(vis.g, vis.b)) > 0.0) {
+    vec3 h = normalize(l + v);
+    float a = s.rough * s.rough;
+    // The sun is a disc about half a degree across, not a point. Widening the
+    // lobe to at least that (and taking the energy back out) is what stops a
+    // near-mirror surface from turning into a field of white sparks.
+    const float SUN_A = 0.0047;
+    float aw = min(a + SUN_A, 1.0);
+    float energy = (a / aw) * (a / aw);
+    float spec = D_GGX(max(dot(n, h), 0.0), aw) * V_SmithGGX(NoV, NoL, aw) * energy;
+    vec3 F = F_Schlick(f0, max(dot(h, v), 0.0));
+    vec3 sun = uSunColour * NoL * vis * (1.0 + caustic);
+    col += sun * (diffuseCol * INV_PI * (1.0 - F) + F * min(spec, 30.0));
+  }
+  col += diffuseCol * skyIrradiance(n) * INV_PI;
+  return col;
+}
+
+vec3 environment(vec3 ro, vec3 rd);
+
+/** A one-bounce shade for rays that are already secondary - no more recursion. */
+vec3 shadeCheap(vec3 p, vec3 n, vec3 rd) {
+  Surf s = surfAt(p);
+  vec3 vis = sunVisibility(p + n * 0.9);
+  vec3 col = shadeDirect(s, n, -rd, vis, causticAt(p));
+  col += emissionOf(s);
+  // Clear material seen by a secondary ray still has to let the world behind it
+  // through, or water hidden behind water comes out black.
+  if (s.trans > 0.05) {
+    float F = fresnelDielectric(max(dot(n, -rd), 0.0), 1.0 / s.ior);
+    vec3 behind = environment(p + rd * 2.0, rd);
+    col = mix(mix(behind, col, F), col, 1.0 - s.trans);
+  }
+  return col;
+}
+
+vec3 floorColour(vec3 p, vec3 rd) {
+  vec2 q = p.xz / uGrid.x;
+  float grid = smoothstep(0.02, 0.05, min(abs(fract(q.x * 4.0) - 0.5), abs(fract(q.y * 4.0) - 0.5)));
+  vec3 albedo = mix(vec3(0.16, 0.155, 0.15), vec3(0.24, 0.235, 0.23), grid);
+  vec3 n = vec3(0.0, 1.0, 0.0);
+  Surf s;
+  s.albedo = albedo; s.rough = 0.55; s.metal = 0.0; s.trans = 0.0; s.ior = 1.5;
+  s.absorb = vec3(0.0); s.glow = 0.0; s.temp = 20.0;
+  vec3 vis = sunVisibility(p + n * 0.6);
+  return shadeDirect(s, n, -rd, vis, causticAt(p));
+}
+
+/** Sky, sun, and the ground plane the box stands on. */
+vec3 environment(vec3 ro, vec3 rd) {
+  // A ray that has slipped under the floor (refraction through a shallow pool
+  // does this constantly) still sees the floor, not the dark underside of the sky.
+  if (ro.y <= uFloorY + 1e-3) {
+    return floorColour(vec3(ro.x, uFloorY, ro.z), vec3(rd.x, -abs(rd.y) - 0.2, rd.z));
+  }
+  if (rd.y < -1e-4) {
+    float t = (uFloorY - ro.y) / rd.y;
+    if (t > 0.0) {
+      vec3 p = ro + rd * t;
+      float r = length(p.xz - uGrid.xz * 0.5) / uGrid.x;
+      // Far ground fades into the colour of the sky at the horizon rather than
+      // into the dim underside of it, which is what makes a haze read as haze.
+      vec3 haze = skyRadiance(normalize(vec3(rd.x, 0.03, rd.z) + vec3(1e-5)));
+      if (r < 9.0) return mix(floorColour(p, rd), haze, smoothstep(2.5, 8.0, r));
+      return haze;
+    }
+  }
+  return skyRadiance(rd) + sunRadiance(rd);
+}
+
+/** Follow a secondary ray: another surface if it meets one, otherwise the sky. */
+vec3 traceSecondary(vec3 ro, vec3 rd) {
+  vec2 br = boxRange(ro, rd, boxLo(), boxHi());
+  float t0 = max(br.x, 0.0);
+  if (br.y > t0) {
+    Hit h = marchSurface(ro, rd, t0, br.y);
+    if (h.hit) {
+      vec3 p = ro + rd * h.t;
+      return shadeCheap(p, normalAt(p), rd);
+    }
+  }
+  return environment(ro, rd);
+}
+
+/**
+ * Refraction. Snell's law in and out again, Beer-Lambert absorption over the
+ * distance actually travelled through the liquid, and total internal reflection
+ * handled properly - which is where most of water's character comes from.
+ */
+vec3 traceRefraction(vec3 p, vec3 n, vec3 rd, Surf s) {
+  vec3 dir = refract(rd, n, 1.0 / s.ior);
+  if (dot(dir, dir) < 1e-6) dir = reflect(rd, n);
+  vec3 pos = p + dir * 0.6;
+  vec3 atten = vec3(1.0);
+  for (int bounce = 0; bounce < 3; bounce++) {
+    float far = boxRange(pos, dir, boxLo(), boxHi()).y;
+    float d = 0.0;
+    bool left = false;
+    for (int i = 0; i < 128; i++) {
+      if (d >= far) break;
+      d += 0.75;
+      if (fillAt(pos + dir * d) < uIso) { left = true; break; }
+    }
+    atten *= exp(-s.absorb * d * uDx * uClarity);
+    if (max(atten.r, max(atten.g, atten.b)) < 0.01) return vec3(0.0);
+    if (!left) return atten * environment(pos + dir * d, dir);
+    vec3 ep = pos + dir * d;
+    vec3 nOut = normalAt(ep);
+    vec3 outDir = refract(dir, -nOut, s.ior);
+    if (dot(outDir, outDir) < 1e-6) {          // total internal reflection
+      dir = reflect(dir, nOut);
+      pos = ep - nOut * 0.6;
+      continue;
+    }
+    return atten * traceSecondary(ep + outDir * 0.7, outDir);
+  }
+  return atten * environment(pos, dir);
+}
+
+/** Steam, smoke and flame, gathered along the ray as participating media. */
+vec4 gatherGas(vec3 ro, vec3 rd, float t0, float t1) {
+  if (uDoGas == 0) return vec4(0.0, 0.0, 0.0, 1.0);
+  vec3 acc = vec3(0.0);
+  float trans = 1.0;
+  float dt = 1.25;
+  float t = t0;
+  // Sunlight through smoke changes slowly along a ray, so it is traced once every
+  // few samples rather than at every one; the alternative is thousands of shadow
+  // marches for a single pixel.
+  vec3 vis = vec3(1.0);
+  int stale = 99;
+  // Start each pixel at a different offset along the ray. Marching a volume on a
+  // fixed lattice draws the lattice; dithering turns that into noise, which the
+  // temporal accumulation then averages away.
+  t += dt * hash1(uint(gl_FragCoord.x) * 73856093u + uint(gl_FragCoord.y) * 19349663u + uFrameSeed);
+  for (int i = 0; i < 128; i++) {
+    if (t >= t1 || trans < 0.01) break;
+    vec3 q = ro + rd * t;
+    if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
+    vec4 D = sampleGrid(uFD, q);
+    float g = D.z;
+    if (g > 1e-3) {
+      if (stale >= 5) { vis = sunVisibility(q); stale = 0; }
+      stale++;
+      vec4 A = sampleGrid(uFA, q);
+      vec4 C = sampleGrid(uFC, q);
+      float w = max(A.w, 1e-4);
+      vec3 albedo = clamp(A.rgb / w, 0.0, 1.0);
+      float temp = D.w / w;
+      float glow = max(C.w / w, 0.0);
+      float sigma = g * uGasSigma;
+      float a = 1.0 - exp(-sigma * dt);
+      vec3 lit = albedo * (uSunColour * vis * 0.5 + skyIrradiance(vec3(0.0, 1.0, 0.0)) * INV_PI);
+      if (glow > 1e-3 && temp > 420.0) {
+        lit += blackbody(temp + T_ZERO_C) * thermalPower(temp) * glow * uGlowGain
+             * smoothstep(420.0, 700.0, temp);
+      }
+      acc += trans * a * lit;
+      trans *= 1.0 - a;
+    }
+    t += dt;
+  }
+  return vec4(acc, trans);
+}
+`;
+const TRACE_FS = GLSL_HEAD + GLSL_COMMON + RAY_LIB + `
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd;
+uniform vec2 uRes, uJitter;
+uniform float uReflectGain;
+uniform sampler2D uGVel, uGAux, uPress;
+uniform int uView;
+out vec4 oColour;
+
+/** False-colour ramp for the inspection views. */
+vec3 ramp(float t) {
+  t = clamp(t, 0.0, 1.0);
+  return clamp(vec3(1.6 * t - 0.3, 1.4 * sin(3.1416 * t), 1.5 - 2.2 * t), 0.0, 1.0);
+}
+
+/** What the solver is thinking, rather than what the scene looks like. */
+vec3 inspect(vec3 ro, vec3 rd, float t0, float t1, bool hit, float tHit, vec3 p, vec3 n) {
+  if (uView == 2) return hit ? n * 0.5 + 0.5 : vec3(0.05);
+  if (uView == 1) return hit ? surfAt(p).albedo : vec3(0.05);
+  if (uView == 5) return hit ? sunVisibility(p + n * 0.9) : vec3(0.05);
+  if (uView == 6) return hit ? ramp(causticAt(p) * 0.5) : vec3(0.02);
+  // Volume readouts: take the largest value seen along the ray.
+  float best = 0.0;
+  float t = t0;
+  for (int i = 0; i < 256; i++) {
+    if (t >= min(t1, hit ? tHit + 1.0 : t1)) break;
+    vec3 q = ro + rd * t;
+    if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
+    vec4 D = sampleGrid(uFD, q);
+    float w = max(sampleGrid(uFA, q).w, 1e-4);
+    if (D.x + D.z > 0.05) {
+      if (uView == 3) best = max(best, (D.w / w + 60.0) / 1300.0);
+      else if (uView == 4) best = max(best, length(sampleGrid(uGVel, q).xyz) / 8.0);
+      else if (uView == 7) best = max(best, sampleGrid(uPress, q).x * 0.02);
+      else if (uView == 8) best = max(best, D.x);
+    }
+    t += 0.7;
+  }
+  return ramp(best);
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy + uJitter) / uRes * 2.0 - 1.0;
+  vec3 ro = uCamPos;
+  vec3 rd = normalize(uCamFwd + uCamRight * uv.x + uCamUp * uv.y);
+
+  vec2 br = boxRange(ro, rd, boxLo(), boxHi());
+  float tEnter = max(br.x, 0.0);
+  float tLeave = br.y;
+
+  vec3 colour;
+  float depth = 1e9;
+  if (tLeave <= tEnter) {
+    colour = environment(ro, rd);
+  } else {
+    Hit h = marchSurface(ro, rd, tEnter, tLeave);
+    if (h.hit) {
+      depth = h.t;
+      vec3 p = ro + rd * h.t;
+      vec3 n = normalAt(p);
+      if (dot(n, rd) > 0.0) n = -n;
+      Surf s = surfAt(p);
+      vec3 vis = sunVisibility(p + n * 0.9);
+      colour = shadeDirect(s, n, -rd, vis, causticAt(p));
+
+      float cosI = max(dot(n, -rd), 0.0);
+      float F = fresnelDielectric(cosI, 1.0 / s.ior);
+      vec3 Fspec = mix(vec3(F), F_Schlick(s.albedo, cosI), s.metal);
+
+      if (uDoReflect == 1) {
+        // Rough surfaces scatter their reflection; smooth ones mirror it.
+        vec3 refl = normalize(mix(reflect(rd, n), n, s.rough * s.rough * 0.85));
+        vec3 rc = traceSecondary(p + n * 0.8, refl);
+        colour = mix(colour, rc, clamp(Fspec.g * uReflectGain, 0.0, 1.0) * (1.0 - s.rough * 0.6));
+        colour += rc * Fspec * s.metal * 0.65;
+      }
+      if (uDoRefract == 1 && s.trans > 0.05 && s.metal < 0.5) {
+        vec3 through = traceRefraction(p, n, rd, s);
+        colour = mix(colour, mix(through, colour, F), s.trans);
+      }
+      colour += emissionOf(s);
+    } else {
+      colour = environment(ro, rd);
+      vec2 fr = boxRange(ro, rd, boxLo(), boxHi());
+      depth = min(fr.y, 1e9);
+    }
+  }
+
+  if (uView > 0) {
+    bool hit = depth < 1e8;
+    vec3 hp = ro + rd * depth;
+    vec3 hn = hit ? normalAt(hp) : vec3(0.0);
+    if (hit && dot(hn, rd) > 0.0) hn = -hn;
+    oColour = vec4(inspect(ro, rd, tEnter, tLeave, hit, depth, hp, hn), depth);
+    return;
+  }
+
+  vec4 gas = gatherGas(ro, rd, tEnter, min(depth, tLeave));
+  colour = colour * gas.w + gas.rgb;
+  oColour = vec4(max(colour, vec3(0.0)), depth);
+}`;
+const PHOTON_FS = GLSL_HEAD + GLSL_COMMON + RAY_LIB + `
+uniform vec2 uPhotonRes;
+uniform uint uSeed;
+out vec4 oDrop;
+void main() {
+  vec2 id = gl_FragCoord.xy;
+  uint h = hashU(uint(id.y * uPhotonRes.x + id.x) + uSeed * 9781u);
+  vec2 jitter = vec2(hash1(h), hash1(h + 3u));
+  vec2 uv = (id + jitter) / uPhotonRes;
+
+  // Build a square of starting points facing the sun, outside the box.
+  vec3 centre = uGrid * 0.5;
+  vec3 up = abs(uSunDir.y) > 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+  vec3 ex = normalize(cross(up, uSunDir));
+  vec3 ey = normalize(cross(uSunDir, ex));
+  float span = length(uGrid) * 0.62;
+  vec3 ro = centre + uSunDir * span + (uv.x - 0.5) * 2.0 * span * ex + (uv.y - 0.5) * 2.0 * span * ey;
+  vec3 rd = -uSunDir;
+
+  vec2 br = boxRange(ro, rd, boxLo(), boxHi());
+  if (br.y <= max(br.x, 0.0)) { oDrop = vec4(0.0); return; }
+  float t = max(br.x, 0.0);
+  vec3 energy = vec3(1.0);
+
+  for (int seg = 0; seg < 4; seg++) {
+    Hit hit = marchSurface(ro, rd, t + 0.01, br.y);
+    if (!hit.hit) { oDrop = vec4(0.0); return; }
+    vec3 p = ro + rd * hit.t;
+    vec3 n = normalAt(p);
+    if (dot(n, rd) > 0.0) n = -n;
+    Surf s = surfAt(p);
+    if (s.trans < 0.35 || s.metal > 0.5) {
+      // Opaque: this is where the focused light lands.
+      oDrop = vec4(p, max(energy.g, 0.0));
+      return;
+    }
+    float F = fresnelDielectric(max(dot(n, -rd), 0.0), 1.0 / s.ior);
+    energy *= (1.0 - F);
+    vec3 dir = refract(rd, n, 1.0 / s.ior);
+    if (dot(dir, dir) < 1e-6) { oDrop = vec4(0.0); return; }
+    // Cross the medium and refract out again.
+    float d = 0.0;
+    bool left = false;
+    for (int i = 0; i < 96; i++) {
+      if (d > length(uGrid)) break;
+      d += 0.8;
+      if (fillAt(p + dir * d) < uIso) { left = true; break; }
+    }
+    if (!left) { oDrop = vec4(0.0); return; }
+    energy *= exp(-s.absorb * d * uDx * uClarity);
+    vec3 ep = p + dir * d;
+    vec3 nOut = normalAt(ep);
+    vec3 outDir = refract(dir, -nOut, s.ior);
+    if (dot(outDir, outDir) < 1e-6) { oDrop = vec4(0.0); return; }
+    ro = ep + outDir * 0.4;
+    rd = outDir;
+    br = boxRange(ro, rd, boxLo(), boxHi());
+    t = 0.0;
+    if (br.y <= 0.0) { oDrop = vec4(0.0); return; }
+  }
+  oDrop = vec4(0.0);
+}`;
+const PHOTON_SPLAT_VS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uDrops;
+uniform ivec2 uPhotonSize;
+uniform float uPhotonGain;
+flat out float vEnergy;
+void main() {
+  ivec2 t = ivec2(gl_VertexID - (gl_VertexID / uPhotonSize.x) * uPhotonSize.x, gl_VertexID / uPhotonSize.x);
+  vec4 d = texelFetch(uDrops, t, 0);
+  ivec3 c = ivec3(floor(d.xyz));
+  if (d.w <= 1e-4 || !inGrid(c)) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vEnergy = 0.0;
+    return;
+  }
+  vEnergy = d.w * uPhotonGain;
+  vec2 texel = vec2(cellTexel(c)) + 0.5;
+  gl_Position = vec4(texel / uAtlas * 2.0 - 1.0, 0.0, 1.0);
+  gl_PointSize = 1.0;
+}`;
+const PHOTON_SPLAT_FS = GLSL_HEAD + `
+flat in float vEnergy;
+out vec4 oE;
+void main() { oE = vec4(vEnergy, 0.0, 0.0, 0.0); }`;
+/** Blur and fade the caustic volume - photons are noisy, light is not. */
+const CAUSTIC_BLUR_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uSrc, uPrev;
+uniform ivec3 uStep;
+uniform float uBlend;
+out vec4 oE;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  ivec3 c = texelCell(t);
+  if (c.z >= gridSize().z) { oE = vec4(0.0); return; }
+  float v = 0.25 * (fetchCell(uSrc, c - uStep).x + 2.0 * texelFetch(uSrc, t, 0).x + fetchCell(uSrc, c + uStep).x);
+  if (uBlend > 0.0) v = mix(texelFetch(uPrev, t, 0).x, v, uBlend);
+  oE = vec4(v);
+}`;
+
+/* ---- 24-glsl-post.js ---- */
+/** Blend this frame into the running average. Still scenes converge; moving ones do not smear. */
+const ACCUM_FS = GLSL_HEAD + `
+uniform sampler2D uNew, uHistory;
+uniform float uBlend;
+out vec4 oColour;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  vec4 n = texelFetch(uNew, t, 0);
+  vec4 h = texelFetch(uHistory, t, 0);
+  oColour = vec4(mix(h.rgb, n.rgb, uBlend), n.a);
+}`;
+const BRIGHT_FS = GLSL_HEAD + `
+uniform sampler2D uSrc;
+uniform vec2 uSrcSize;
+uniform float uThreshold, uExposure;
+out vec4 oColour;
+void main() {
+  vec2 uv = gl_FragCoord.xy * 2.0 / uSrcSize;
+  vec3 c = vec3(0.0);
+  c += texture(uSrc, (uv + vec2(-0.5, -0.5) / uSrcSize)).rgb;
+  c += texture(uSrc, (uv + vec2( 0.5, -0.5) / uSrcSize)).rgb;
+  c += texture(uSrc, (uv + vec2(-0.5,  0.5) / uSrcSize)).rgb;
+  c += texture(uSrc, (uv + vec2( 0.5,  0.5) / uSrcSize)).rgb;
+  c *= 0.25 * uExposure;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  oColour = vec4(c * max(l - uThreshold, 0.0) / max(l, 1e-4), 1.0);
+}`;
+const BLOOM_BLUR_FS = GLSL_HEAD + `
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+out vec4 oColour;
+void main() {
+  vec2 uv = gl_FragCoord.xy * uTexel;
+  // Nine-tap Gaussian, separable, run once per axis.
+  vec3 c = texture(uSrc, uv).rgb * 0.227027;
+  c += (texture(uSrc, uv + uTexel * 1.3846) + texture(uSrc, uv - uTexel * 1.3846)).rgb * 0.3162162;
+  c += (texture(uSrc, uv + uTexel * 3.2307) + texture(uSrc, uv - uTexel * 3.2307)).rgb * 0.0702702;
+  oColour = vec4(c, 1.0);
+}`;
+const COMPOSITE_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform sampler2D uHDR, uBloom, uBloomWide;
+uniform vec2 uRes;
+uniform float uExposure, uBloomGain, uVignette;
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd;
+uniform vec3 uBrushPos;
+uniform float uBrushRadius;
+uniform int uBrushShow;
+uniform vec3 uBrushTint;
+out vec4 oColour;
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec4 hdr = texture(uHDR, uv);
+  vec3 c = hdr.rgb * uExposure;
+  c += (texture(uBloom, uv).rgb + texture(uBloomWide, uv).rgb) * uBloomGain * 0.5;
+
+  // The brush, drawn as a sphere in the scene rather than a flat circle.
+  if (uBrushShow == 1) {
+    vec3 rd = normalize(uCamFwd + uCamRight * (uv.x * 2.0 - 1.0) + uCamUp * (uv.y * 2.0 - 1.0));
+    vec3 oc = uBrushPos - uCamPos;
+    float tc = dot(oc, rd);
+    float d = length(oc - rd * tc);
+    float aa = max(fwidth(d), 1e-4);
+    float ring = smoothstep(1.6 * aa, 0.0, abs(d - uBrushRadius));
+    float front = step(0.0, tc);
+    float inside = smoothstep(uBrushRadius, uBrushRadius * 0.7, d);
+    float near = step(tc - uBrushRadius, hdr.a);
+    c = mix(c, c + uBrushTint * 0.06, inside * front * near);
+    c += uBrushTint * ring * front * 0.55;
+  }
+
+  c = acesFilm(c);
+  c *= 1.0 - uVignette * dot(uv - 0.5, uv - 0.5) * 1.9;
+  oColour = vec4(toSRGB(max(c, vec3(0.0))), 1.0);
+}`;
+
+/* ---- 30-sim.js ---- */
+/** Tunables the settings panel edits directly. SI units throughout. */
+const PHYSICS = {
+  gravity: 9.81,          // m/s^2
+  timeScale: 1.0,
+  substeps: 2,
+  iterations: 40,         // pressure sweeps per substep
+  flip: 0.95,             // 1 = pure FLIP (lively), 0 = pure PIC (syrupy)
+  affine: 0.85,           // how much of the APIC affine field to carry
+  pack: 1.0,              // strength of the anti-clumping volume correction
+  packLimit: 1.25,        // fill fraction above which particles are nudged apart
+  separate: 5.0,          // how fast that nudge acts, cells per second
+  tension: 1.0,           // multiplier on each material's surface tension
+  granular: 1.0,          // multiplier on the Coulomb yield stress
+  yieldFloor: 1.2,        // strain rate below which grains behave as a stiff solid (1/s)
+  cohesion: 4.0,          // turns each material's cohesion into a stress
+  pressFloor: 0.9,        // a grain's own weight, so surface grains still have grip
+  fricCap: 55,            // largest frictional deceleration, m/s^2
+  cohesionAccel: 26,      // how strongly sticky powders hold together, m/s^2
+  maxAccel: 260,          // cap on the plastic acceleration, m/s^2
+  buoyancy: 0.45,         // multiplier on the Boussinesq term
+  viscScale: 1.0,
+  heatScale: 900,         // conduction is scaled onto a human timescale
+  heatCouple: 9,          // how fast a particle equalises with its cell
+  radiate: 1.0,
+  latent: 0.55,           // seconds a particle must sit past a threshold to change
+  ambient: 20,            // degrees C
+  drag: 0.02,
+  restitution: 0.12,
+  wallFriction: 0.88,
+};
+const QUALITY = {
+  low:    { grid: 48, particles: 1 << 16, iterations: 24, substeps: 2, scale: 0.55, photons: 128 },
+  medium: { grid: 64, particles: 1 << 17, iterations: 36, substeps: 2, scale: 0.75, photons: 192 },
+  high:   { grid: 64, particles: 1 << 18, iterations: 48, substeps: 3, scale: 1.0,  photons: 256 },
+  ultra:  { grid: 80, particles: 1 << 18, iterations: 64, substeps: 3, scale: 1.0,  photons: 320 },
+};
+const COARSE_SCALE = 4;
+class Sim {
+  constructor(gfx, { grid = 64, particles = 1 << 17, boxMetres = 2.56 } = {}) {
+    this.gfx = gfx;
+    const n = grid;
+    this.n = atlasFor(n, n, n);
+    this.dx = boxMetres / n;
+    this.boxMetres = boxMetres;
+    const cn = Math.ceil(n / COARSE_SCALE);
+    this.coarseN = atlasFor(cn, cn, cn);
+    this.capacity = particles;
+    this.pw = Math.min(2048, 1 << Math.ceil(Math.log2(Math.sqrt(particles))));
+    this.ph = Math.ceil(particles / this.pw);
+    this.capacity = this.pw * this.ph;
+    this.used = 0;
+    this.head = 0;          // where the next flowing particle goes
+    this.solidTop = 0;      // slots below this hold fixed scenery and are never reused
+    this.activeCount = 0;
+    this.time = 0;
+    this.emitters = [];
+    this.spawnCarry = new Map();
+    this.gridUniforms = {
+      uGrid: [this.n.nx, this.n.ny, this.n.nz],
+      uTiles: [this.n.tx, this.n.ty],
+      uAtlas: [this.n.w, this.n.h],
+    };
+    this.#allocate();
+    this.#compile();
+  }
+  #allocate() {
+    const g = this.gfx;
+    const A = this.n;
+    const grid = (fmt = 'RGBA16F') => g.texture(A.w, A.h, { internal: fmt });
+    const part = () => g.texture(this.pw, this.ph, { internal: 'RGBA32F', filter: 'NEAREST' });
+    this.matTex = g.texture(MAT_ROWS, MAT_COUNT, { internal: 'RGBA32F', filter: 'NEAREST', data: packMaterials() });
+    this.gMom = grid(); this.gHeat = grid(); this.gGran = grid();
+    this.fbP2G = g.framebuffer([this.gMom, this.gHeat, this.gGran]);
+    this.gVel = [grid(), grid()];
+    this.gPre = grid();
+    this.gAux = [grid(), grid()];
+    this.gProp = grid();
+    this.gNorm = grid();
+    this.gTau = [grid(), grid()];
+    this.fbPrep = g.framebuffer([this.gVel[0], this.gPre, this.gAux[0], this.gProp]);
+    this.fbVel = this.gVel.map((t) => g.framebuffer([t]));
+    this.fbAux = this.gAux.map((t) => g.framebuffer([t]));
+    this.fbNorm = g.framebuffer([this.gNorm]);
+    this.fbTau = g.framebuffer(this.gTau);
+    this.gPress = [grid('R32F'), grid('R32F')];
+    this.fbPress = this.gPress.map((t) => g.framebuffer([t]));
+    this.gDiv = grid('R32F');
+    this.fbDiv = g.framebuffer([this.gDiv]);
+    this.pPos = [part(), part()];
+    this.pVel = [part(), part()];
+    this.pAux = [part(), part()];
+    this.fbPart = [0, 1].map((i) => g.framebuffer([this.pPos[i], this.pVel[i], this.pAux[i]]));
+    this.pC = [[grid0(g, this.pw, this.ph), grid0(g, this.pw, this.ph), grid0(g, this.pw, this.ph)],
+               [grid0(g, this.pw, this.ph), grid0(g, this.pw, this.ph), grid0(g, this.pw, this.ph)]];
+    this.fbC = this.pC.map((set) => g.framebuffer(set));
+    this.pi = 0;
+    this.rF = [[grid(), grid(), grid(), grid()], [grid(), grid(), grid(), grid()]];
+    this.fbR = this.rF.map((set) => g.framebuffer(set));
+    this.ri = 0;
+    this.coarse = g.texture(this.coarseN.w, this.coarseN.h, { internal: 'R16F', filter: 'NEAREST' });
+    this.fbCoarse = g.framebuffer([this.coarse]);
+    this.countLevels = [];
+    let w = this.pw >> 1, h = Math.max(1, this.ph >> 1);
+    while (w > 4 || h > 4) {
+      const t = g.texture(w, h, { internal: 'R32F', filter: 'NEAREST' });
+      this.countLevels.push({ tex: t, fb: g.framebuffer([t]), w, h });
+      w = Math.max(1, w >> 1);
+      h = Math.max(1, h >> 1);
+    }
+    const t = g.texture(Math.max(1, w), Math.max(1, h), { internal: 'R32F', filter: 'NEAREST' });
+    this.countLevels.push({ tex: t, fb: g.framebuffer([t]), w: Math.max(1, w), h: Math.max(1, h) });
+    this.countPixels = new Float32Array(4 * 4 * 4);
+  }
+  #compile() {
+    const g = this.gfx;
+    this.progP2G = g.program('p2g', P2G_FS, P2G_VS);
+    this.progPrep = g.program('prep', GRID_PREP_FS);
+    this.progHeat = g.program('heat', HEAT_FS);
+    this.progVisc = g.program('visc', VISC_FS);
+    this.progStress = g.program('stress', STRESS_FS);
+    this.progPlastic = g.program('plastic', PLASTIC_FS);
+    this.progNormal = g.program('normal', NORMAL_FS);
+    this.progTension = g.program('tension', TENSION_FS);
+    this.progDiv = g.program('div', DIV_FS);
+    this.progPressure = g.program('pressure', PRESSURE_FS);
+    this.progProject = g.program('project', PROJECT_FS);
+    this.progExtrap = g.program('extrap', EXTRAP_FS);
+    this.progG2P = g.program('g2p', G2P_FS);
+    this.progG2PC = g.program('g2pc', G2P_C_FS);
+    this.progEmit = g.program('emit', EMIT_FS, EMIT_VS);
+    this.progEmitZero = g.program('emitzero', EMIT_ZERO_FS, EMIT_VS);
+    this.progRSplat = g.program('rsplat', RSPLAT_FS, RSPLAT_VS);
+    this.progRBlur = g.program('rblur', RBLUR_FS);
+    this.progCoarse = g.program('coarse', COARSE_FS);
+    this.progCount = g.program('count', COUNT_FS);
+  }
+  get base() {
+    return { ...this.gridUniforms, uMat: this.matTex, uPTex: [this.pw, this.ph], uDx: this.dx };
+  }
+  /** Wipe every particle and field. */
+  clear() {
+    const g = this.gfx;
+    for (const fb of [...this.fbPart, ...this.fbC, ...this.fbPress, ...this.fbR]) g.clear(fb);
+    for (const fb of [...this.fbVel, ...this.fbAux, this.fbNorm, this.fbDiv, this.fbCoarse]) g.clear(fb);
+    this.used = 0;
+    this.head = 0;
+    this.solidTop = 0;
+    this.activeCount = 0;
+    this.time = 0;
+    this.emitters = [];
+    this.spawnCarry.clear();
+  }
+  /** Load a scene: upload its particles, remember its emitters. */
+  load(scene) {
+    this.clear();
+    const built = buildParticles(scene, this.n.nx, this.n.ny, this.n.nz, this.capacity);
+    this.emitters = built.emitters.map((e) => ({ ...e }));
+    this.perCell = built.perCell;
+    if (built.count > 0) {
+      const rows = Math.ceil(built.count / this.pw);
+      const pad = (src) => {
+        const out = new Float32Array(rows * this.pw * 4);
+        out.set(src.subarray(0, Math.min(src.length, out.length)));
+        return out;
+      };
+      this.gfx.upload(this.pPos[this.pi], pad(built.pos), 0, 0, this.pw, rows);
+      this.gfx.upload(this.pVel[this.pi], pad(built.vel), 0, 0, this.pw, rows);
+      this.gfx.upload(this.pAux[this.pi], pad(built.aux), 0, 0, this.pw, rows);
+    }
+    this.used = Math.min(this.capacity, Math.ceil(built.count / this.pw) * this.pw);
+    this.solidTop = Math.min(built.rigidCount, Math.floor(this.capacity * 0.7));
+    this.head = Math.max(built.count % this.capacity, this.solidTop);
+    this.activeCount = built.count;
+    return built;
+  }
+  /**
+   * Write a burst of particles into the pool.
+   * Fixed materials are stacked at the bottom and kept; everything that flows
+   * goes into a ring above them, so a spout running for ten minutes recycles its
+   * own old water rather than eating the walls somebody built.
+   */
+  spawn({ mat, pos, radius, vel = [0, 0, 0], count, temp = null, volume = null, jitter = 0.15 }) {
+    let n = Math.min(Math.floor(count), this.capacity);
+    if (n <= 0 || mat <= 0) return 0;
+    const m = MATERIALS[mat];
+    const rigid = m.phase === PHASE.RIGID;
+    const perCell = rigid ? 2 : (this.perCell || 4);
+    let base, ringStart, ringSize;
+    if (rigid) {
+      const limit = Math.floor(this.capacity * 0.7);
+      n = Math.min(n, Math.max(0, limit - this.solidTop));
+      if (n === 0) return 0;
+      base = this.solidTop;
+      ringStart = 0;
+      ringSize = this.capacity;
+    } else {
+      ringStart = this.solidTop;
+      ringSize = Math.max(1, this.capacity - this.solidTop);
+      base = Math.max(this.head, ringStart);
+    }
+    const u = {
+      ...this.base,
+      uBase: base,
+      uRingStart: ringStart,
+      uRingSize: ringSize,
+      uSpawnPos: pos,
+      uSpawnVel: vel,
+      uSpawnRadius: radius,
+      uSpawnMat: mat,
+      uSpawnTemp: temp == null ? m.temp : temp,
+      uSpawnVolume: volume == null ? 1 / perCell : volume,
+      uJitter: jitter,
+      uSeed: (Math.random() * 0xffffffff) >>> 0,
+    };
+    this.gfx.points(this.fbPart[this.pi], this.progEmit, u, n);
+    this.gfx.points(this.fbC[this.pi], this.progEmitZero, u, n);
+    if (rigid) {
+      this.solidTop += n;
+      this.head = Math.max(this.head, this.solidTop);
+      this.used = Math.max(this.used, this.solidTop);
+    } else {
+      const end = base + n;
+      this.head = ringStart + ((end - ringStart) % ringSize);
+      this.used = end >= this.capacity ? this.capacity : Math.max(this.used, end);
+    }
+    return n;
+  }
+  /** Run the scene's own spouts for this frame, carrying fractional counts over. */
+  runEmitters(dt) {
+    for (let i = 0; i < this.emitters.length; i++) {
+      const e = this.emitters[i];
+      const carry = (this.spawnCarry.get(i) || 0) + e.rate * dt;
+      const n = Math.floor(carry);
+      this.spawnCarry.set(i, carry - n);
+      if (n > 0) {
+        this.spawn({
+          mat: matId(e.mat),
+          pos: [e.at[0] * this.n.nx, e.at[1] * this.n.ny, e.at[2] * this.n.nz],
+          radius: e.radius,
+          vel: e.vel,
+          count: n,
+          jitter: 0.25,
+        });
+      }
+    }
+  }
+  /** One substep of the whole pipeline. */
+  step(dt, brush) {
+    const g = this.gfx;
+    const P = PHYSICS;
+    const b = this.base;
+    const points = Math.max(8, this.used * 8);
+    g.clear(this.fbP2G);
+    g.scatter(this.fbP2G, this.progP2G, {
+      ...b, uPos: this.pPos[this.pi], uVel: this.pVel[this.pi], uAux: this.pAux[this.pi],
+      uC0: this.pC[this.pi][0], uC1: this.pC[this.pi][1], uC2: this.pC[this.pi][2],
+      uAffine: P.affine,
+    }, points);
+    g.pass(this.fbPrep, this.progPrep, {
+      ...b, uMom: this.gMom, uHeat: this.gHeat, uGran: this.gGran,
+      uDt: dt, uGravity: P.gravity, uAmbient: P.ambient, uDrag: P.drag,
+    });
+    let vi = 0, ai = 0;
+    for (let i = 0; i < 2; i++) {
+      g.pass(this.fbAux[1 - ai], this.progHeat, {
+        ...b, uAux: this.gAux[ai], uDt: dt, uAmbient: P.ambient,
+        uHeatScale: P.heatScale, uRadiate: P.radiate,
+      });
+      ai = 1 - ai;
+    }
+    for (let i = 0; i < 2; i++) {
+      g.pass(this.fbVel[1 - vi], this.progVisc, {
+        ...b, uVel: this.gVel[vi], uAux: this.gAux[ai], uDt: dt, uViscScale: P.viscScale,
+      });
+      vi = 1 - vi;
+    }
+    if (P.tension > 0) {
+      g.pass(this.fbNorm, this.progNormal, { ...b, uAux: this.gAux[ai] });
+      g.pass(this.fbVel[1 - vi], this.progTension, {
+        ...b, uVel: this.gVel[vi], uAux: this.gAux[ai], uProp: this.gProp, uNorm: this.gNorm,
+        uDt: dt, uTension: P.tension,
+      });
+      vi = 1 - vi;
+    }
+    g.pass(this.fbDiv, this.progDiv, { ...b, uVel: this.gVel[vi], uAux: this.gAux[ai], uPack: P.pack });
+    let pi = 0;
+    for (let i = 0; i < P.iterations; i++) {
+      g.pass(this.fbPress[1 - pi], this.progPressure, {
+        ...b, uPress: this.gPress[pi], uVel: this.gVel[vi], uAux: this.gAux[ai], uDiv: this.gDiv,
+        uDt: dt, uParity: i & 1,
+      });
+      pi = 1 - pi;
+    }
+    if (pi !== 0) {   // leave the answer in slot 0 so the next step can warm-start
+      g.pass(this.fbPress[0], this.progPressure, {
+        ...b, uPress: this.gPress[1], uVel: this.gVel[vi], uAux: this.gAux[ai], uDiv: this.gDiv,
+        uDt: dt, uParity: 2,
+      });
+    }
+    g.pass(this.fbVel[1 - vi], this.progProject, {
+      ...b, uVel: this.gVel[vi], uAux: this.gAux[ai], uPress: this.gPress[0], uDt: dt,
+    });
+    vi = 1 - vi;
+    if (P.granular > 0) {
+      g.pass(this.fbTau, this.progStress, {
+        ...b, uVel: this.gVel[vi], uAux: this.gAux[ai], uProp: this.gProp, uPress: this.gPress[0],
+        uGranular: P.granular, uYieldFloor: P.yieldFloor, uCohesion: P.cohesion,
+      });
+      g.pass(this.fbVel[1 - vi], this.progPlastic, {
+        ...b, uVel: this.gVel[vi], uAux: this.gAux[ai], uT0: this.gTau[0], uT1: this.gTau[1],
+        uDt: dt, uMaxAccel: P.maxAccel,
+      });
+      vi = 1 - vi;
+    }
+    for (let i = 0; i < 2; i++) {
+      g.pass(this.fbVel[1 - vi], this.progExtrap, { ...b, uVel: this.gVel[vi], uAux: this.gAux[ai] });
+      vi = 1 - vi;
+    }
+    const on = brush && brush.active ? 1 : 0;
+    g.pass(this.fbPart[1 - this.pi], this.progG2P, {
+      ...b,
+      uPos: this.pPos[this.pi], uVel: this.pVel[this.pi], uAux: this.pAux[this.pi],
+      uGVel: this.gVel[vi], uGPre: this.gPre, uGAux: this.gAux[ai], uGPress: this.gPress[0],
+      uDt: dt, uGravity: P.gravity, uAmbient: P.ambient, uFlip: P.flip,
+      uBuoyancy: P.buoyancy, uLatent: P.latent, uHeatCouple: P.heatCouple,
+      uRestitution: P.restitution, uWallFriction: P.wallFriction, uPackLimit: P.packLimit, uSeparate: P.separate,
+      uGranular: P.granular, uPressFloor: P.pressFloor, uFricCap: P.fricCap, uCohesionAccel: P.cohesionAccel,
+      uBrushOn: on, uBrushTool: on ? brush.tool : 0,
+      uBrushPos: on ? brush.pos : [0, 0, 0],
+      uBrushVel: on ? brush.vel : [0, 0, 0],
+      uBrushRadius: on ? brush.radius : 0,
+      uBrushStrength: on ? brush.strength : 0,
+      uSeed: (Math.random() * 0xffffffff) >>> 0,
+    });
+    g.pass(this.fbC[1 - this.pi], this.progG2PC, {
+      ...b, uPos: this.pPos[1 - this.pi], uGVel: this.gVel[vi], uCClamp: 6.0,
+    });
+    this.pi = 1 - this.pi;
+    this.velIdx = vi;
+    this.auxIdx = ai;
+    this.time += dt;
+  }
+  /** Rebuild the fields the renderer needs, and the block map that speeds it up. */
+  buildRenderFields() {
+    const g = this.gfx;
+    const b = this.base;
+    g.clear(this.fbR[0]);
+    g.scatter(this.fbR[0], this.progRSplat, {
+      ...b, uPos: this.pPos[this.pi], uVel: this.pVel[this.pi], uAux: this.pAux[this.pi],
+    }, Math.max(8, this.used * 8));
+    let i = 0;
+    const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    for (let round = 0; round < Math.max(1, RENDER.smoothing); round++) {
+      for (const step of axes) {
+        const src = this.rF[i];
+        g.pass(this.fbR[1 - i], this.progRBlur, {
+          ...b, uA: src[0], uB: src[1], uC: src[2], uD: src[3], uStep: step,
+        });
+        i = 1 - i;
+      }
+    }
+    this.ri = i;
+    g.pass(this.fbCoarse, this.progCoarse, {
+      ...b, uSrc: this.rF[i][3],
+      uCGrid: [this.coarseN.nx, this.coarseN.ny, this.coarseN.nz],
+      uCTiles: [this.coarseN.tx, this.coarseN.ty],
+      uScale: COARSE_SCALE,
+    });
+  }
+  fields() { return this.rF[this.ri]; }
+  coarseUniforms() {
+    return {
+      uCoarse: this.coarse,
+      uCGrid: [this.coarseN.nx, this.coarseN.ny, this.coarseN.nz],
+      uCTiles: [this.coarseN.tx, this.coarseN.ty],
+      uCAtlas: [this.coarseN.w, this.coarseN.h],
+      uCoarseScale: COARSE_SCALE,
+    };
+  }
+  /** Count how many slots still hold something, by repeated halving. */
+  measure() {
+    const g = this.gfx;
+    let src = this.pPos[this.pi];
+    let first = 1;
+    for (const lvl of this.countLevels) {
+      g.pass(lvl.fb, this.progCount, { uSrc: src, uFirst: first, uSize: [lvl.w * 2, lvl.h * 2] });
+      src = lvl.tex;
+      first = 0;
+    }
+    const last = this.countLevels[this.countLevels.length - 1];
+    g.bind(last.fb);
+    const px = new Float32Array(last.w * last.h * 4);
+    g.gl.readPixels(0, 0, last.w, last.h, g.gl.RGBA, g.gl.FLOAT, px);
+    let total = 0;
+    for (let i = 0; i < last.w * last.h; i++) total += px[i * 4];
+    this.activeCount = Math.round(total);
+    return this.activeCount;
+  }
+}
+/** A particle-sized RGBA32F texture (used for the affine field). */
+function grid0(g, w, h) { return g.texture(w, h, { internal: 'RGBA32F', filter: 'NEAREST' }); }
+/** Sums a 2x2 block; the first level turns "is this slot in use" into a 1 or a 0. */
+const COUNT_FS = GLSL_HEAD + `
+uniform sampler2D uSrc;
+uniform int uFirst;
+uniform vec2 uSize;
+out vec4 oSum;
+float take(ivec2 t) {
+  if (float(t.x) >= uSize.x || float(t.y) >= uSize.y) return 0.0;
+  vec4 v = texelFetch(uSrc, t, 0);
+  return uFirst == 1 ? (v.w > 0.5 ? 1.0 : 0.0) : v.x;
+}
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy) * 2;
+  oSum = vec4(take(t) + take(t + ivec2(1, 0)) + take(t + ivec2(0, 1)) + take(t + ivec2(1, 1)), 0.0, 0.0, 1.0);
+}`;
+
+/* ---- 40-render.js ---- */
+const RENDER = {
+  scale: 0.75,          // resolution the tracer runs at, relative to the window
+  smoothing: 3,         // rounds of blur over the fields before they are traced
+  exposure: 0.9,
+  bloom: 0.45,
+  vignette: 0.32,
+  reflections: true,
+  refraction: true,
+  shadows: true,
+  caustics: true,
+  gas: true,
+  accumulate: true,
+  surfSteps: 160,
+  shadowSteps: 40,
+  surfStep: 0.55,
+  clarity: 3.0,         // multiplier on Beer-Lambert absorption
+  shadowSigma: 2.6,
+  gasSigma: 1.9,
+  glowGain: 0.30,
+  reflectGain: 1.0,
+  sunElevation: 46,     // degrees above the horizon
+  sunAzimuth: 38,       // degrees around
+  sunIntensity: 3.7,
+  skyGain: 0.85,
+  turbidity: 0.35,
+  fov: 42,              // degrees, vertical
+  photons: 192,
+  view: 0,              // 0 beauty, then the inspection views in VIEWS
+};
+const VIEWS = ['Finished picture', 'Material colour', 'Surface normals', 'Temperature',
+  'Speed', 'Sunlight reaching', 'Caustics', 'Pressure', 'Fill fraction'];
+/** Where the ray under the pointer lands, so the brush can sit on the surface. */
+const PICK_FS = GLSL_HEAD + GLSL_COMMON + RAY_LIB + `
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd;
+uniform vec2 uPickUV;
+out vec4 oPick;
+void main() {
+  vec2 uv = uPickUV * 2.0 - 1.0;
+  vec3 rd = normalize(uCamFwd + uCamRight * uv.x + uCamUp * uv.y);
+  vec2 br = boxRange(uCamPos, rd, boxLo(), boxHi());
+  float t0 = max(br.x, 0.0);
+  if (br.y > t0) {
+    Hit h = marchSurface(uCamPos, rd, t0, br.y);
+    if (h.hit) { oPick = vec4(uCamPos + rd * h.t, 1.0); return; }
+  }
+  oPick = vec4(uCamPos + rd * max(t0, 0.0), 0.0);
+}`;
+class Renderer {
+  constructor(gfx, sim) {
+    this.gfx = gfx;
+    this.sim = sim;
+    this.frame = 0;
+    this.width = 0;
+    this.height = 0;
+    this.pickResult = { pos: [0, 0, 0], hit: false };
+    this.#compile();
+    this.#allocVolumes();
+  }
+  #compile() {
+    const g = this.gfx;
+    this.progTrace = g.program('trace', TRACE_FS);
+    this.progAccum = g.program('accum', ACCUM_FS);
+    this.progBright = g.program('bright', BRIGHT_FS);
+    this.progBlur = g.program('bloomblur', BLOOM_BLUR_FS);
+    this.progComposite = g.program('composite', COMPOSITE_FS);
+    this.progPhoton = g.program('photon', PHOTON_FS);
+    this.progPhotonSplat = g.program('photonsplat', PHOTON_SPLAT_FS, PHOTON_SPLAT_VS);
+    this.progCausticBlur = g.program('causticblur', CAUSTIC_BLUR_FS);
+    this.progPick = g.program('pick', PICK_FS);
+  }
+  #allocVolumes() {
+    const g = this.gfx;
+    const A = this.sim.n;
+    const vol = () => g.texture(A.w, A.h, { internal: 'R16F' });
+    this.cSplat = vol(); this.cTmpA = vol(); this.cTmpB = vol();
+    this.caustic = [vol(), vol()];
+    this.ci = 0;
+    this.fbSplat = g.framebuffer([this.cSplat]);
+    this.fbTmpA = g.framebuffer([this.cTmpA]);
+    this.fbTmpB = g.framebuffer([this.cTmpB]);
+    this.fbCaustic = this.caustic.map((t) => g.framebuffer([t]));
+    this.zero = g.texture(1, 1, { internal: 'R16F' });
+    this.pick = g.texture(1, 1, { internal: 'RGBA32F', filter: 'NEAREST' });
+    this.fbPick = g.framebuffer([this.pick]);
+    g.clear(this.fbPick);
+    for (const fb of [this.fbSplat, this.fbTmpA, this.fbTmpB, ...this.fbCaustic]) g.clear(fb);
+    this.pickBuf = new Float32Array(4);
+    this.#photonSize(RENDER.photons);
+  }
+  #photonSize(n) {
+    const g = this.gfx;
+    if (this.photonN === n) return;
+    this.photonN = n;
+    if (this.photonTex) this.gfx.gl.deleteTexture(this.photonTex.tex);
+    this.photonTex = g.texture(n, n, { internal: 'RGBA32F', filter: 'NEAREST' });
+    this.fbPhoton = g.framebuffer([this.photonTex]);
+  }
+  resize(width, height) {
+    const g = this.gfx;
+    const w = Math.max(64, Math.round(width * RENDER.scale));
+    const h = Math.max(64, Math.round(height * RENDER.scale));
+    if (w === this.width && h === this.height) return;
+    for (const o of this.sized || []) g.free(o);
+    this.sized = [];
+    this.width = w;
+    this.height = h;
+    const hdr = () => { const t = g.texture(w, h, { internal: 'RGBA16F' }); this.sized.push(t); return t; };
+    this.hdr = hdr();
+    this.history = [hdr(), hdr()];
+    this.hi = 0;
+    this.fbHDR = g.framebuffer([this.hdr]);
+    this.fbHistory = this.history.map((t) => g.framebuffer([t]));
+    this.sized.push(this.fbHDR, ...this.fbHistory);
+    this.bloom = [];
+    let bw = Math.max(4, w >> 1), bh = Math.max(4, h >> 1);
+    for (let i = 0; i < 4; i++) {
+      const a = g.texture(bw, bh, { internal: 'RGBA16F' });
+      const b = g.texture(bw, bh, { internal: 'RGBA16F' });
+      const lvl = { a, b, fa: g.framebuffer([a]), fb: g.framebuffer([b]), w: bw, h: bh };
+      this.sized.push(a, b, lvl.fa, lvl.fb);
+      this.bloom.push(lvl);
+      bw = Math.max(4, bw >> 1);
+      bh = Math.max(4, bh >> 1);
+    }
+    this.reset();
+  }
+  reset() { this.frame = 0; }
+  sunDirection() {
+    const e = RENDER.sunElevation * Math.PI / 180;
+    const a = RENDER.sunAzimuth * Math.PI / 180;
+    return v3norm([Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a)]);
+  }
+  /** Everything the ray library needs, gathered once per frame. */
+  sceneUniforms() {
+    const sim = this.sim;
+    const f = sim.fields();
+    const sun = this.sunDirection();
+    const warm = Math.max(0, 1 - Math.max(RENDER.sunElevation, 0) / 60);
+    return {
+      ...sim.gridUniforms,
+      uFA: f[0], uFB: f[1], uFC: f[2], uFD: f[3],
+      ...sim.coarseUniforms(),
+      uCaustic: RENDER.caustics ? this.caustic[this.ci] : this.zero,
+      uIso: 0.5,
+      uDx: sim.dx,
+      uClarity: RENDER.clarity,
+      uShadowSigma: RENDER.shadowSigma,
+      uGasSigma: RENDER.gasSigma,
+      uGlowGain: RENDER.glowGain,
+      uFloorY: 1.0,
+      uDoShadows: RENDER.shadows ? 1 : 0,
+      uDoReflect: RENDER.reflections ? 1 : 0,
+      uDoRefract: RENDER.refraction ? 1 : 0,
+      uDoCaustics: RENDER.caustics ? 1 : 0,
+      uDoGas: RENDER.gas ? 1 : 0,
+      uSurfSteps: RENDER.surfSteps,
+      uShadowSteps: RENDER.shadowSteps,
+      uSurfStep: RENDER.surfStep,
+      uSunDir: sun,
+      uSunColour: [
+        RENDER.sunIntensity * (1 + warm * 0.5),
+        RENDER.sunIntensity * (1 - warm * 0.18),
+        RENDER.sunIntensity * (1 - warm * 0.45),
+      ],
+      uSkyGain: RENDER.skyGain,
+      uTurbidity: RENDER.turbidity,
+      uFrameSeed: (this.frame * 2654435761) >>> 0,
+      uGVel: sim.gVel[sim.velIdx || 0],
+      uGAux: sim.gAux[sim.auxIdx || 0],
+      uPress: sim.gPress[0],
+      uView: RENDER.view,
+    };
+  }
+  /** Trace photons from the sun through every water surface and drop them where they land. */
+  updateCaustics(scene) {
+    if (!RENDER.caustics) return;
+    const g = this.gfx;
+    this.#photonSize(RENDER.photons);
+    g.pass(this.fbPhoton, this.progPhoton, {
+      ...scene, uPhotonRes: [this.photonN, this.photonN], uSeed: this.frame >>> 0,
+    });
+    const cells = this.sim.n.nx * this.sim.n.ny * this.sim.n.nz;
+    const gain = 0.55 * cells / (this.photonN * this.photonN * 26);
+    g.scatter(this.fbSplat, this.progPhotonSplat, {
+      ...this.sim.gridUniforms, uDrops: this.photonTex,
+      uPhotonSize: [this.photonN, this.photonN], uPhotonGain: gain,
+    }, this.photonN * this.photonN, { clear: true });
+    const b = this.sim.gridUniforms;
+    g.pass(this.fbTmpA, this.progCausticBlur, { ...b, uSrc: this.cSplat, uPrev: this.zero, uStep: [1, 0, 0], uBlend: 0 });
+    g.pass(this.fbTmpB, this.progCausticBlur, { ...b, uSrc: this.cTmpA, uPrev: this.zero, uStep: [0, 1, 0], uBlend: 0 });
+    g.pass(this.fbCaustic[1 - this.ci], this.progCausticBlur, {
+      ...b, uSrc: this.cTmpB, uPrev: this.caustic[this.ci], uStep: [0, 0, 1], uBlend: 0.35,
+    });
+    this.ci = 1 - this.ci;
+  }
+  cameraUniforms(cam, aspect) {
+    const fwd = v3norm(v3sub(cam.target, cam.position));
+    const tan = Math.tan(RENDER.fov * Math.PI / 360);
+    let right = v3cross(fwd, [0, 1, 0]);
+    if (v3len(right) < 1e-5) right = v3cross(fwd, [0, 0, 1]);
+    right = v3norm(right);
+    const up = v3cross(right, fwd);
+    return {
+      uCamPos: cam.position,
+      uCamFwd: fwd,
+      uCamRight: v3scale(right, tan * aspect),
+      uCamUp: v3scale(up, tan),
+    };
+  }
+  /** One pixel, traced through the cursor, so the brush knows where it is. */
+  pickAt(scene, cam, aspect, uv) {
+    const g = this.gfx;
+    g.bind(this.fbPick);
+    g.gl.readPixels(0, 0, 1, 1, g.gl.RGBA, g.gl.FLOAT, this.pickBuf);
+    this.pickResult = { pos: [this.pickBuf[0], this.pickBuf[1], this.pickBuf[2]], hit: this.pickBuf[3] > 0.5 };
+    g.pass(this.fbPick, this.progPick, {
+      ...scene, ...this.cameraUniforms(cam, aspect), uPickUV: uv,
+    });
+    return this.pickResult;
+  }
+  draw(scene, cam, aspect, brush, settled) {
+    const g = this.gfx;
+    const jitter = [halton(this.frame + 1, 2) - 0.5, halton(this.frame + 1, 3) - 0.5];
+    g.pass(this.fbHDR, this.progTrace, {
+      ...scene, ...this.cameraUniforms(cam, aspect),
+      uRes: [this.width, this.height],
+      uJitter: jitter,
+      uReflectGain: RENDER.reflectGain,
+    });
+    const blend = !RENDER.accumulate ? 1 : (settled ? Math.max(0.06, 1 / (this.frame + 1)) : 0.42);
+    g.pass(this.fbHistory[1 - this.hi], this.progAccum, {
+      uNew: this.hdr, uHistory: this.frame === 0 ? this.hdr : this.history[this.hi], uBlend: this.frame === 0 ? 1 : blend,
+    });
+    this.hi = 1 - this.hi;
+    const lit = this.history[this.hi];
+    let src = lit;
+    let srcSize = [this.width, this.height];
+    for (let i = 0; i < this.bloom.length; i++) {
+      const lvl = this.bloom[i];
+      g.pass(lvl.fa, this.progBright, {
+        uSrc: src, uSrcSize: srcSize, uThreshold: i === 0 ? 1.0 : 0.0, uExposure: i === 0 ? RENDER.exposure : 1,
+      });
+      g.pass(lvl.fb, this.progBlur, { uSrc: lvl.a, uTexel: [1 / lvl.w, 0] });
+      g.pass(lvl.fa, this.progBlur, { uSrc: lvl.b, uTexel: [0, 1 / lvl.h] });
+      src = lvl.a;
+      srcSize = [lvl.w, lvl.h];
+    }
+    g.bind(null);
+    g.gl.useProgram(this.progComposite.prog);
+    g.setUniforms(this.progComposite, {
+      uHDR: lit,
+      uBloom: this.bloom[1].a,
+      uBloomWide: this.bloom[this.bloom.length - 1].a,
+      uRes: [g.canvas.width, g.canvas.height],
+      uExposure: RENDER.exposure,
+      uBloomGain: RENDER.bloom,
+      uVignette: RENDER.vignette,
+      ...this.cameraUniforms(cam, aspect),
+      uBrushShow: brush.show ? 1 : 0,
+      uBrushPos: brush.pos,
+      uBrushRadius: brush.radius,
+      uBrushTint: brush.tint,
+    });
+    g.gl.drawArrays(g.gl.TRIANGLES, 0, 3);
+    this.frame++;
+  }
+}
+
+/* ---- 50-camera.js ---- */
+class OrbitCamera {
+  constructor(grid, { yaw = -0.45, pitch = 0.12, dist = 2.4 } = {}) {
+    this.grid = grid;
+    this.target = [grid[0] * 0.5, grid[1] * 0.42, grid[2] * 0.5];
+    this.home = this.target.slice();
+    this.yaw = yaw;
+    this.pitch = pitch;
+    this.dist = dist * grid[0];
+    this.minDist = grid[0] * 0.35;
+    this.maxDist = grid[0] * 7;
+    this.moved = true;
+  }
+  /** Point at a box of a different size (after a change of detail level). */
+  setGrid(grid) {
+    this.grid = grid;
+    this.home = [grid[0] * 0.5, grid[1] * 0.42, grid[2] * 0.5];
+    this.target = this.home.slice();
+    this.minDist = grid[0] * 0.35;
+    this.maxDist = grid[0] * 7;
+    this.moved = true;
+  }
+  apply({ yaw, pitch, dist }) {
+    if (yaw != null) this.yaw = yaw;
+    if (pitch != null) this.pitch = pitch;
+    if (dist != null) this.dist = dist * this.grid[0];
+    this.target = this.home.slice();
+    this.moved = true;
+  }
+  get position() {
+    const cp = Math.cos(this.pitch);
+    return [
+      this.target[0] + this.dist * cp * Math.sin(this.yaw),
+      this.target[1] + this.dist * Math.sin(this.pitch),
+      this.target[2] + this.dist * cp * Math.cos(this.yaw),
+    ];
+  }
+  orbit(dx, dy) {
+    this.yaw -= dx * 0.006;
+    this.pitch = clamp(this.pitch + dy * 0.006, -1.45, 1.45);
+    this.moved = true;
+  }
+  zoom(delta) {
+    this.dist = clamp(this.dist * Math.exp(delta * 0.0016), this.minDist, this.maxDist);
+    this.moved = true;
+  }
+  /** Slide the point we are looking at, in the plane of the screen. */
+  pan(dx, dy) {
+    const fwd = v3norm(v3sub(this.target, this.position));
+    let right = v3cross(fwd, [0, 1, 0]);
+    if (v3len(right) < 1e-5) right = v3cross(fwd, [0, 0, 1]);
+    right = v3norm(right);
+    const up = v3cross(right, fwd);
+    const k = this.dist * 0.0016;
+    this.target = v3add(this.target, v3add(v3scale(right, -dx * k), v3scale(up, dy * k)));
+    for (let i = 0; i < 3; i++) this.target[i] = clamp(this.target[i], -this.grid[i], this.grid[i] * 2);
+    this.moved = true;
+  }
+  /** Basis for turning a screen position into a ray. */
+  ray(uvx, uvy, aspect, fovDeg) {
+    const fwd = v3norm(v3sub(this.target, this.position));
+    let right = v3cross(fwd, [0, 1, 0]);
+    if (v3len(right) < 1e-5) right = v3cross(fwd, [0, 0, 1]);
+    right = v3norm(right);
+    const up = v3cross(right, fwd);
+    const tan = Math.tan(fovDeg * Math.PI / 360);
+    return v3norm(v3add(fwd, v3add(
+      v3scale(right, (uvx * 2 - 1) * tan * aspect),
+      v3scale(up, (uvy * 2 - 1) * tan))));
+  }
+}
+
+/* ---- 60-input.js ---- */
+const brush = {
+  material: 1,
+  tool: TOOL.DRAW,
+  radius: 6,
+  rate: 55,
+  depth: 0,            // pushes the brush along the view ray when nothing is under it
+  pos: [0, 0, 0],
+  prev: null,
+  vel: [0, 0, 0],
+  active: false,
+  show: false,
+  tint: [0.35, 0.75, 1.0],
+  strength: 1,
+  shift: false,
+};
+function attachInput(canvas, cam, hooks) {
+  const pointers = new Map();
+  let orbiting = false;
+  let panning = false;
+  let last = null;
+  let pinch = 0;
+  const uvOf = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return [(e.clientX - r.left) / r.width, 1 - (e.clientY - r.top) / r.height];
+  };
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('pointerdown', (e) => {
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* carry on without it */ }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    hooks.cursor(uvOf(e));
+    if (pointers.size === 2) {
+      brush.active = false;
+      orbiting = true;
+      const [a, b] = [...pointers.values()];
+      pinch = Math.hypot(a.x - b.x, a.y - b.y);
+      last = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      return;
+    }
+    last = { x: e.clientX, y: e.clientY };
+    if (e.button === 2) { orbiting = true; canvas.classList.add('orbiting'); }
+    else if (e.button === 1) { panning = true; canvas.classList.add('orbiting'); }
+    else if (e.button === 0) { brush.active = true; brush.prev = null; hooks.brushDown(); }
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    hooks.cursor(uvOf(e));
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      cam.zoom((pinch - d) * 1.6);
+      if (last) cam.orbit(mid.x - last.x, mid.y - last.y);
+      pinch = d;
+      last = mid;
+      return;
+    }
+    if (!last) return;
+    const dx = e.clientX - last.x;
+    const dy = e.clientY - last.y;
+    last = { x: e.clientX, y: e.clientY };
+    if (orbiting) cam.orbit(dx, dy);
+    else if (panning) cam.pan(dx, dy);
+  });
+  const release = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = 0;
+    if (pointers.size === 0) {
+      orbiting = false;
+      panning = false;
+      brush.active = false;
+      brush.prev = null;
+      last = null;
+      canvas.classList.remove('orbiting');
+    }
+  };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('pointerleave', () => { brush.show = false; });
+  canvas.addEventListener('pointerenter', () => { brush.show = true; });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.shiftKey) hooks.setRadius(brush.radius * Math.exp(-e.deltaY * 0.0012));
+    else if (e.ctrlKey || e.metaKey) brush.depth = clamp(brush.depth - e.deltaY * 0.05, -60, 60);
+    else cam.zoom(e.deltaY);
+  }, { passive: false });
+  addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    brush.shift = e.shiftKey;
+    const k = e.key.toLowerCase();
+    if (k >= '0' && k <= '9') {
+      const idx = k === '0' ? 9 : Number(k) - 1;
+      if (PAINTABLE[idx]) hooks.setMaterial(PAINTABLE[idx].id);
+    } else if (k === 'q') hooks.setTool(TOOL.DRAW);
+    else if (k === 'w') hooks.setTool(TOOL.ERASE);
+    else if (k === 'e') hooks.setTool(TOOL.DRAG);
+    else if (k === 'r') hooks.setTool(TOOL.PUSH);
+    else if (k === 't') hooks.setTool(TOOL.HEAT);
+    else if (k === '[') hooks.setRadius(brush.radius - 1);
+    else if (k === ']') hooks.setRadius(brush.radius + 1);
+    else if (k === ' ') { e.preventDefault(); hooks.togglePlay(); }
+    else if (k === '.') hooks.stepOnce();
+    else if (k === 'h') hooks.toggleHelp();
+    else if (k === 'tab') { e.preventDefault(); hooks.togglePanel(); }
+    else if (k === 'backspace') { e.preventDefault(); hooks.empty(); }
+    else if (k === 'escape') hooks.closeHelp();
+  });
+  addEventListener('keyup', (e) => { brush.shift = e.shiftKey; });
+}
+
+/* ---- 70-ui.js ---- */
+const TOOLS = [
+  { id: TOOL.DRAW,  name: 'Draw',  key: 'Q', hint: 'Add the chosen material' },
+  { id: TOOL.ERASE, name: 'Erase', key: 'W', hint: 'Take material away' },
+  { id: TOOL.DRAG,  name: 'Drag',  key: 'E', hint: 'Grab hold and pull, like stirring' },
+  { id: TOOL.PUSH,  name: 'Push',  key: 'R', hint: 'Blow outwards - hold Shift to suck in' },
+  { id: TOOL.HEAT,  name: 'Heat',  key: 'T', hint: 'Warm things up - hold Shift to chill' },
+];
+function el(tag, props = {}, kids = []) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k === 'html') n.innerHTML = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (v != null && v !== false) n.setAttribute(k, v === true ? '' : String(v));
+  }
+  for (const kid of [].concat(kids)) if (kid) n.appendChild(kid);
+  return n;
+}
+const syncers = [];
+/** A labelled slider bound to a property on an object. */
+function slider(obj, key, { label, min, max, step = 0.01, fmt = (v) => v.toFixed(2), onChange } = {}) {
+  const out = el('b', { text: fmt(obj[key]) });
+  const input = el('input', { type: 'range', min, max, step, value: obj[key] });
+  input.addEventListener('input', () => {
+    obj[key] = Number(input.value);
+    out.textContent = fmt(obj[key]);
+    if (onChange) onChange(obj[key]);
+  });
+  syncers.push(() => { input.value = String(obj[key]); out.textContent = fmt(obj[key]); });
+  return el('div', { class: 'row slider' }, [
+    el('div', { class: 'head' }, [el('label', { text: label }), out]),
+    input,
+  ]);
+}
+function toggle(obj, key, { label, onChange } = {}) {
+  const input = el('input', { type: 'checkbox' });
+  input.checked = !!obj[key];
+  syncers.push(() => { input.checked = !!obj[key]; });
+  input.addEventListener('change', () => { obj[key] = input.checked; if (onChange) onChange(obj[key]); });
+  return el('div', { class: 'row' }, [el('label', { text: label }), input]);
+}
+function group(title, rows) {
+  return el('div', { class: 'group' }, [el('h4', { text: title }), ...rows]);
+}
+function buildUI(ctx) {
+  const $ = (id) => document.getElementById(id);
+  const palette = $('palette');
+  const matButtons = new Map();
+  PAINTABLE.forEach((m, i) => {
+    const key = i < 10 ? String((i + 1) % 10) : '';
+    const b = el('button', { class: 'mat', type: 'button', title: m.blurb || m.name, onclick: () => ctx.setMaterial(m.id) }, [
+      el('span', { class: 'dot' }),
+      el('span', { class: 'nm', text: m.name }),
+      el('span', { class: 'key', text: key }),
+    ]);
+    b.querySelector('.dot').style.background = swatchOf(m);
+    palette.appendChild(b);
+    matButtons.set(m.id, b);
+  });
+  const tools = $('tools');
+  const toolButtons = new Map();
+  for (const t of TOOLS) {
+    const b = el('button', { class: 'btn tool', type: 'button', title: t.hint, onclick: () => ctx.setTool(t.id) },
+      [el('span', { text: t.name }), el('small', { text: t.key })]);
+    tools.appendChild(b);
+    toolButtons.set(t.id, b);
+  }
+  const scenes = $('scenes');
+  const sceneButtons = new Map();
+  for (const s of SCENES) {
+    const b = el('button', { class: 'btn scene', type: 'button', onclick: () => ctx.loadScene(s.id) },
+      [el('b', { text: s.name }), el('span', { text: s.blurb })]);
+    scenes.appendChild(b);
+    sceneButtons.set(s.id, b);
+  }
+  $('page-physics').append(
+    group('Forces', [
+      slider(PHYSICS, 'gravity', { label: 'Gravity', min: 0, max: 25, step: 0.1, fmt: (v) => v.toFixed(1) + ' m/s²' }),
+      slider(PHYSICS, 'buoyancy', { label: 'Buoyancy', min: 0, max: 1.5 }),
+      slider(PHYSICS, 'tension', { label: 'Surface tension', min: 0, max: 3 }),
+      slider(PHYSICS, 'viscScale', { label: 'Thickness', min: 0, max: 4 }),
+      slider(PHYSICS, 'granular', { label: 'Grain friction', min: 0, max: 3 }),
+      slider(PHYSICS, 'cohesion', { label: 'Grain stickiness', min: 0, max: 20, step: 0.1, fmt: (v) => v.toFixed(1) }),
+      slider(PHYSICS, 'yieldFloor', { label: 'Grain stiffness', min: 0.1, max: 8 }),
+      slider(PHYSICS, 'fricCap', { label: 'Grain grip limit', min: 0, max: 200, step: 1, fmt: (v) => v.toFixed(0) }),
+    ]),
+    group('Heat', [
+      slider(PHYSICS, 'heatScale', { label: 'How fast heat spreads', min: 0, max: 4000, step: 10, fmt: (v) => String(Math.round(v)) }),
+      slider(PHYSICS, 'latent', { label: 'Latent heat', min: 0.05, max: 3, fmt: (v) => v.toFixed(2) + ' s' }),
+      slider(PHYSICS, 'ambient', { label: 'Room temperature', min: -30, max: 80, step: 1, fmt: (v) => Math.round(v) + ' °C' }),
+      slider(PHYSICS, 'radiate', { label: 'Cooling to the room', min: 0, max: 4 }),
+    ]),
+    group('Solver', [
+      slider(PHYSICS, 'timeScale', { label: 'Speed', min: 0, max: 2 }),
+      slider(PHYSICS, 'substeps', { label: 'Steps per frame', min: 1, max: 4, step: 1, fmt: (v) => String(v) }),
+      slider(PHYSICS, 'iterations', { label: 'Pressure sweeps', min: 8, max: 80, step: 1, fmt: (v) => String(v) }),
+      slider(PHYSICS, 'flip', { label: 'Liveliness (FLIP)', min: 0, max: 1 }),
+      slider(PHYSICS, 'pack', { label: 'Anti-clumping', min: 0, max: 4 }),
+      slider(PHYSICS, 'packLimit', { label: 'Crowding limit', min: 1, max: 2.5 }),
+      slider(PHYSICS, 'restitution', { label: 'Bounce', min: 0, max: 0.7 }),
+      slider(PHYSICS, 'wallFriction', { label: 'Wall grip', min: 0.4, max: 1 }),
+    ]),
+    el('p', { class: 'note', text: 'Water is held incompressible by a pressure solve; grains yield by Coulomb friction; steam and smoke rise by the Boussinesq term.' }),
+  );
+  const dirty = () => ctx.resetAccumulation();
+  $('page-light').append(
+    group('Sun and sky', [
+      slider(RENDER, 'sunElevation', { label: 'Sun height', min: 2, max: 88, step: 0.5, fmt: (v) => v.toFixed(0) + '°', onChange: dirty }),
+      slider(RENDER, 'sunAzimuth', { label: 'Sun direction', min: 0, max: 360, step: 1, fmt: (v) => v.toFixed(0) + '°', onChange: dirty }),
+      slider(RENDER, 'sunIntensity', { label: 'Sun strength', min: 0, max: 8, onChange: dirty }),
+      slider(RENDER, 'skyGain', { label: 'Sky brightness', min: 0, max: 2.5, onChange: dirty }),
+      slider(RENDER, 'turbidity', { label: 'Haze', min: 0, max: 1, onChange: dirty }),
+    ]),
+    group('Ray tracing', [
+      toggle(RENDER, 'shadows', { label: 'Shadows', onChange: dirty }),
+      toggle(RENDER, 'reflections', { label: 'Reflections', onChange: dirty }),
+      toggle(RENDER, 'refraction', { label: 'Refraction through water', onChange: dirty }),
+      toggle(RENDER, 'caustics', { label: 'Caustics', onChange: dirty }),
+      toggle(RENDER, 'gas', { label: 'Steam, smoke and flame', onChange: dirty }),
+      slider(RENDER, 'clarity', { label: 'Water depth of colour', min: 0, max: 8, onChange: dirty }),
+      slider(RENDER, 'shadowSigma', { label: 'Shadow density', min: 0.2, max: 8, onChange: dirty }),
+      slider(RENDER, 'glowGain', { label: 'Glow from heat', min: 0, max: 1.5, onChange: dirty }),
+    ]),
+    group('Picture', [
+      slider(RENDER, 'exposure', { label: 'Exposure', min: 0.1, max: 3 }),
+      slider(RENDER, 'bloom', { label: 'Bloom', min: 0, max: 1.5 }),
+      slider(RENDER, 'vignette', { label: 'Vignette', min: 0, max: 1 }),
+      slider(RENDER, 'fov', { label: 'Lens', min: 18, max: 80, step: 1, fmt: (v) => v.toFixed(0) + '°', onChange: dirty }),
+      toggle(RENDER, 'accumulate', { label: 'Settle the image when still', onChange: dirty }),
+    ]),
+  );
+  const presetSel = el('select', { onchange: (e) => ctx.setQuality(e.target.value) },
+    Object.keys(QUALITY).map((k) => el('option', { value: k, text: k[0].toUpperCase() + k.slice(1) })));
+  presetSel.value = ctx.quality;
+  const viewSel = el('select', { onchange: (e) => { RENDER.view = Number(e.target.value); ctx.resetAccumulation(); } },
+    VIEWS.map((name, i) => el('option', { value: i, text: name })));
+  const info = el('p', { class: 'note' });
+  $('page-quality').append(
+    group('Detail', [
+      el('div', { class: 'row' }, [el('label', { text: 'Preset' }), presetSel]),
+      el('div', { class: 'row' }, [el('label', { text: 'Show' }), viewSel]),
+      slider(RENDER, 'scale', { label: 'Render resolution', min: 0.3, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%', onChange: () => ctx.rescale() }),
+      slider(RENDER, 'surfSteps', { label: 'Ray steps', min: 40, max: 400, step: 10, fmt: (v) => String(v), onChange: dirty }),
+      slider(RENDER, 'shadowSteps', { label: 'Shadow steps', min: 4, max: 128, step: 4, fmt: (v) => String(v), onChange: dirty }),
+      slider(RENDER, 'surfStep', { label: 'Step length', min: 0.2, max: 1.2, fmt: (v) => v.toFixed(2) + ' cells', onChange: dirty }),
+      slider(RENDER, 'photons', { label: 'Caustic photons', min: 64, max: 384, step: 32, fmt: (v) => (v * v / 1000).toFixed(0) + 'k', onChange: dirty }),
+      slider(RENDER, 'smoothing', { label: 'Surface smoothing', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: dirty }),
+    ]),
+    info,
+  );
+  $('btn-play').addEventListener('click', ctx.togglePlay);
+  $('btn-step').addEventListener('click', ctx.stepOnce);
+  $('btn-clear').addEventListener('click', ctx.empty);
+  $('btn-reset').addEventListener('click', () => ctx.loadScene(ctx.sceneId));
+  $('btn-help').addEventListener('click', ctx.toggleHelp);
+  $('btn-panel').addEventListener('click', ctx.togglePanel);
+  $('help-close').addEventListener('click', ctx.closeHelp);
+  $('help').addEventListener('click', (e) => { if (e.target.id === 'help') ctx.closeHelp(); });
+  for (const tab of $('panel-tabs').children) {
+    tab.addEventListener('click', () => {
+      for (const t of $('panel-tabs').children) t.classList.toggle('is-on', t === tab);
+      for (const page of document.querySelectorAll('.tab-page')) {
+        page.classList.toggle('is-on', page.dataset.page === tab.dataset.tab);
+      }
+    });
+  }
+  const sizeInput = $('brush-size');
+  const sizeOut = $('brush-size-out');
+  sizeInput.addEventListener('input', () => ctx.setRadius(Number(sizeInput.value)));
+  const rateInput = $('brush-rate');
+  const rateOut = $('brush-rate-out');
+  rateInput.addEventListener('input', () => { brush.rate = Number(rateInput.value); rateOut.textContent = rateInput.value; });
+  $('help-physics').textContent =
+    'Particles carry the material, the temperature and the momentum; a background grid handles everything that needs '
+    + 'neighbours. Each step scatters the particles onto that grid (FLIP with an APIC affine term), adds weight and '
+    + 'buoyancy, spreads heat and momentum, applies surface tension, then solves a variable-density Poisson equation '
+    + 'so the velocity field carries no divergence - that is what makes water behave like water. Grains yield under '
+    + 'Coulomb friction, which is why sand piles at its angle of repose. The picture is made by marching rays through '
+    + 'the same fields: Cook-Torrance GGX shading, Fresnel and Snell for the water surface, Beer-Lambert absorption '
+    + 'for its colour, ray-traced shadows, reflections and photon caustics, and Planck’s law for anything hot enough to glow.';
+  return {
+    setMaterial(id) {
+      for (const [mid, b] of matButtons) b.classList.toggle('is-on', mid === id);
+      const m = MATERIALS[id];
+      brush.tint = m.albedo.map((c) => Math.min(1, 0.25 + c * 1.4));
+    },
+    setTool(id) { for (const [tid, b] of toolButtons) b.classList.toggle('is-on', tid === id); },
+    setScene(id) { for (const [sid, b] of sceneButtons) b.classList.toggle('is-on', sid === id); },
+    setRadius(r) { sizeInput.value = String(r); sizeOut.textContent = r.toFixed(r < 10 ? 1 : 0); },
+    setQuality(q) { presetSel.value = q; },
+    refresh() { for (const sync of syncers) sync(); },
+    setInfo(text) { info.textContent = text; },
+    rescaleSlider() { /* value already lives in RENDER */ },
+    readout(html) { $('readout').innerHTML = html; },
+    playing(on) { $('btn-play').classList.toggle('is-paused', !on); $('btn-play').querySelector('.lbl').textContent = on ? 'Pause' : 'Play'; },
+    panel(on) { $('panel').hidden = !on; },
+    help(on) { $('help').hidden = !on; },
+  };
+}
+
+/* ---- 90-main.js ---- */
+const APP = {
+  playing: true,
+  sceneId: 'dam',
+  quality: 'medium',
+  panelOpen: true,
+  helpOpen: false,
+  stepOnce: false,
+  halt: false,
+  cursor: [0.5, 0.5],
+};
+function fatal(message, detail) {
+  const box = document.getElementById('boot');
+  box.hidden = false;
+  box.innerHTML = '';
+  box.append(
+    el('h1', { text: 'Powder Toy 3D cannot start' }),
+    el('p', { text: message }),
+    detail ? el('p', { html: '<code>' + String(detail).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])) + '</code>' }) : null,
+    el('p', { text: 'It needs WebGL 2 with floating point render targets - any graphics card from the last ten years, in an up to date Chrome, Edge, Firefox or Safari.' }),
+  );
+  document.getElementById('ui').hidden = true;
+}
+function start() {
+  const canvas = document.getElementById('view');
+  let gfx;
+  try {
+    gfx = new Gfx(canvas);
+  } catch (err) {
+    fatal(err instanceof GLError ? err.message : 'Something went wrong setting up the graphics.', err && err.message);
+    return;
+  }
+  let sim, renderer;
+  const cam = new OrbitCamera([64, 64, 64]);
+  let ui = null;
+  let wasSettled = false;
+  let lastMeasure = 0;
+  let frames = 0;
+  let fpsClock = performance.now();
+  let fps = 60;
+  let lastTime = performance.now();
+  let gpuBudget = 0;
+  const build = () => {
+    const Q = QUALITY[APP.quality];
+    PHYSICS.iterations = Q.iterations;
+    PHYSICS.substeps = Q.substeps;
+    RENDER.scale = Q.scale;
+    RENDER.photons = Q.photons;
+    gfx.releaseAll();
+    sim = new Sim(gfx, { grid: Q.grid, particles: Q.particles });
+    renderer = new Renderer(gfx, sim);
+    cam.setGrid([sim.n.nx, sim.n.ny, sim.n.nz]);
+    sizeCanvas(true);
+    loadScene(APP.sceneId, true);
+    if (ui) {
+      ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
+        + `up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
+    }
+  };
+  const loadScene = (id, quiet) => {
+    const scene = SCENES.find((s) => s.id === id) || SCENES[0];
+    APP.sceneId = scene.id;
+    brush.depth = 0;
+    sim.load(scene);
+    if (scene.camera) cam.apply(scene.camera);
+    renderer.reset();
+    if (ui && !quiet) ui.setScene(scene.id);
+    else if (ui) ui.setScene(scene.id);
+  };
+  function sizeCanvas(force) {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
+    const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    if (force || canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      renderer.resize(canvas.clientWidth, canvas.clientHeight);
+    }
+  }
+  function updateBrush(dt, aspect) {
+    const pick = renderer.pickResult;
+    const dir = cam.ray(APP.cursor[0], APP.cursor[1], aspect, RENDER.fov);
+    let pos;
+    if (pick.hit) {
+      pos = pick.pos.slice();
+    } else {
+      const centre = [sim.n.nx * 0.5, sim.n.ny * 0.45, sim.n.nz * 0.5];
+      const t = Math.max(v3dot(v3sub(centre, cam.position), dir), sim.n.nx * 0.2);
+      pos = v3add(cam.position, v3scale(dir, t));
+    }
+    if (brush.depth) pos = v3add(pos, v3scale(dir, brush.depth));
+    for (let i = 0; i < 3; i++) pos[i] = clamp(pos[i], 1.5, [sim.n.nx, sim.n.ny, sim.n.nz][i] - 1.5);
+    brush.vel = brush.prev && dt > 1e-4
+      ? v3scale(v3sub(pos, brush.prev), sim.dx / dt)
+      : [0, 0, 0];
+    if (v3len(brush.vel) > 40) brush.vel = [0, 0, 0];
+    brush.prev = pos;
+    brush.pos = pos;
+  }
+  function brushForSim() {
+    if (!brush.active || brush.tool === TOOL.DRAW) return { active: false };
+    const signed = (brush.tool === TOOL.PUSH || brush.tool === TOOL.HEAT) && brush.shift ? -1 : 1;
+    return {
+      active: true, tool: brush.tool, pos: brush.pos, vel: brush.vel,
+      radius: brush.radius, strength: signed,
+    };
+  }
+  function paint() {
+    const m = MATERIALS[brush.material];
+    const rigid = m.phase === PHASE.RIGID;
+    const perCell = rigid ? 2 : (sim.perCell || 4);
+    const volume = (4 / 3) * Math.PI * Math.pow(brush.radius, 3);
+    const n = clamp(Math.round(volume * perCell * (brush.rate / 100) * (rigid ? 0.10 : 0.22)), 1, 6000);
+    sim.spawn({ mat: brush.material, pos: brush.pos, radius: brush.radius, count: n, jitter: rigid ? 0 : 0.1 });
+  }
+  const ctx = {
+    get sceneId() { return APP.sceneId; },
+    get quality() { return APP.quality; },
+    setMaterial(id) { brush.material = id; ui.setMaterial(id); if (brush.tool === TOOL.ERASE) ctx.setTool(TOOL.DRAW); },
+    setTool(id) { brush.tool = id; brush.depth = 0; ui.setTool(id); },
+    setRadius(r) { brush.radius = clamp(Number(r) || 1, 1, 24); ui.setRadius(brush.radius); },
+    loadScene(id) { loadScene(id); },
+    setQuality(q) { if (QUALITY[q]) { APP.quality = q; ui.setQuality(q); build(); ui.refresh(); } },
+    rescale() { sizeCanvas(true); renderer.reset(); },
+    resetAccumulation() { renderer.reset(); },
+    togglePlay() { APP.playing = !APP.playing; ui.playing(APP.playing); renderer.reset(); },
+    stepOnce() { APP.stepOnce = true; APP.playing = false; ui.playing(false); },
+    empty() { sim.clear(); renderer.reset(); },
+    togglePanel() { APP.panelOpen = !APP.panelOpen; ui.panel(APP.panelOpen); },
+    toggleHelp() { APP.helpOpen = !APP.helpOpen; ui.help(APP.helpOpen); },
+    closeHelp() { APP.helpOpen = false; ui.help(false); },
+    cursor(uv) { APP.cursor = uv; brush.show = true; },
+    brushDown() { renderer.reset(); },
+  };
+  try {
+    build();
+  } catch (err) {
+    fatal('The sandbox could not set up its simulation on this graphics card.', err && err.message);
+    return;
+  }
+  document.getElementById('ui').hidden = false;
+  ui = buildUI(ctx);
+  ui.setMaterial(brush.material);
+  ui.setTool(brush.tool);
+  ui.setScene(APP.sceneId);
+  ui.setRadius(brush.radius);
+  ui.playing(APP.playing);
+  ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
+    + `up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
+  attachInput(canvas, cam, ctx);
+  addEventListener('resize', () => sizeCanvas(false));
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    fatal('The graphics driver reset while the sandbox was running. Reload the page to carry on.');
+  });
+  /** Rebuild the fields, refresh the caustics, pick, and put a frame on screen. */
+  function drawOnce(aspect, settled) {
+    sim.buildRenderFields();
+    renderer.updateCaustics(renderer.sceneUniforms());
+    const scene = renderer.sceneUniforms();
+    renderer.pickAt(scene, cam, aspect, APP.cursor);
+    renderer.draw(scene, cam, aspect, brush, !!settled);
+  }
+  /** Advance the physics by `n` substeps without drawing anything. */
+  function advance(n, dt) {
+    const step = dt || (PHYSICS.timeScale / 60) / Math.max(1, Math.round(PHYSICS.substeps));
+    for (let i = 0; i < n; i++) {
+      sim.step(step, { active: false });
+      sim.runEmitters(step);
+    }
+    renderer.reset();
+  }
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (APP.halt || document.hidden) { lastTime = now; return; }
+    const dtReal = Math.min(0.1, Math.max(1e-4, (now - lastTime) / 1000));
+    lastTime = now;
+    sizeCanvas(false);
+    const aspect = Math.max(0.2, canvas.clientWidth / Math.max(1, canvas.clientHeight));
+    updateBrush(dtReal, aspect);
+    if (brush.active && brush.tool === TOOL.DRAW) paint();
+    const running = APP.playing || APP.stepOnce;
+    if (running) {
+      const sub = Math.max(1, Math.round(PHYSICS.substeps));
+      const frameDt = PHYSICS.timeScale / 60;
+      const dt = frameDt / sub;
+      const b = brushForSim();
+      for (let i = 0; i < sub; i++) sim.step(dt, b);
+      sim.runEmitters(frameDt);
+      APP.stepOnce = false;
+    } else if (brush.active && brush.tool !== TOOL.DRAW) {
+      sim.step(1 / 600, brushForSim());
+    }
+    const settled = !running && !cam.moved && !brush.active;
+    if (settled && !wasSettled) renderer.reset();
+    wasSettled = settled;
+    cam.moved = false;
+    drawOnce(aspect, settled);
+    frames++;
+    if (now - fpsClock > 400) {
+      fps = frames * 1000 / (now - fpsClock);
+      frames = 0;
+      fpsClock = now;
+      if (now - lastMeasure > 900) { sim.measure(); lastMeasure = now; }
+      const pct = Math.round(100 * sim.activeCount / sim.capacity);
+      ui.readout(
+        `<span><b>${fps.toFixed(0)}</b> fps</span>`
+        + `<span class="opt"><b>${(sim.activeCount / 1000).toFixed(0)}k</b> specks (${pct}%)</span>`
+        + `<span class="opt"><b>${sim.time.toFixed(1)}</b> s simulated</span>`
+        + `<span class="opt">${sim.n.nx}³ grid</span>`);
+      if (fps < 24 && RENDER.scale > 0.4 && gpuBudget++ > 3) {
+        RENDER.scale = Math.max(0.4, RENDER.scale - 0.1);
+        sizeCanvas(true);
+        ui.refresh();
+        gpuBudget = 0;
+      } else if (fps > 55) gpuBudget = 0;
+    }
+  }
+  requestAnimationFrame(frame);
+  window.PowderToy = {
+    PHYSICS, RENDER, QUALITY, MATERIALS, SCENES, TOOLS, brush, app: APP, controls: ctx,
+    get sim() { return sim; },
+    get renderer() { return renderer; },
+    get camera() { return cam; },
+    get fps() { return fps; },
+    advance, drawOnce,
+  };
+}
+if (document.readyState === 'loading') addEventListener('DOMContentLoaded', start);
+else start();
+})();
+</script>
+</body>
+</html>
