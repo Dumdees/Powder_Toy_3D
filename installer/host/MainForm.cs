@@ -91,7 +91,11 @@ namespace PowderToy3D
                 core.ContainsFullScreenElementChanged += OnFullScreenElementChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.ProcessFailed += (o, a) => Fail(5, "Sorry - the sandbox stopped unexpectedly. Please open it again.");
-                core.Navigate("https://" + VirtualHost + "/" + Uri.EscapeDataString(AppFileName));
+                // Without a graphics card the medium preset's float textures are enough to lose
+                // the drawing context before the sandbox has drawn anything, so start it small.
+                // The page reads this from its own address bar.
+                string options = _software ? "?quality=low" : "";
+                core.Navigate("https://" + VirtualHost + "/" + Uri.EscapeDataString(AppFileName) + options);
                 if (_smoke)
                 {
                     // Software rendering is slow; give it room, but never hang the build.

@@ -77,6 +77,19 @@ test('the page and the window agree on how full screen is asked for', async () =
     + 'expose - it compiles nowhere, and only fails once the Windows runner gets to it');
 });
 
+test('the window can ask the page to start small, and the page listens', async () => {
+  // On a machine with no graphics card the medium preset allocates enough float
+  // texture to lose the drawing context before anything can be turned down, so the
+  // host starts the page at the low preset by putting it in the address bar.
+  const main = await read('src/js/90-main.js');
+  assert.match(mainForm, /\?quality=low/, 'the host never asks for the small preset');
+  assert.match(main, /URLSearchParams\(location\.search\)/, 'the page never reads its own address bar');
+  assert.match(main, /params\.get\('quality'\)/, 'the page ignores a quality in the address bar');
+  assert.match(main, /QUALITY\[quality\]/, 'the page does not check the quality against the real presets');
+  const sim = await read('src/js/30-sim.js');
+  assert.match(sim, /\blow:\s*\{/, 'there is no low preset for the host to ask for');
+});
+
 test('the host only subscribes to events that exist on CoreWebView2', () => {
   // A spelling check against the .NET surface. Anything not on this list is either a typo
   // or lives on another class; either way it costs a five-minute Windows build to find out.

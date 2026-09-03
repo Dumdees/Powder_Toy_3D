@@ -3667,7 +3667,23 @@ function fatal(message, detail) {
   );
   document.getElementById('ui').hidden = true;
 }
+/**
+ * Let the address bar choose the detail level and the opening scene:
+ * "...html?quality=low&scene=volcano". The Windows program uses this to start small
+ * on a machine with no graphics card, where the medium preset's float textures are
+ * enough to lose the drawing context before anything can be turned down.
+ */
+function applyUrlOptions() {
+  try {
+    const params = new URLSearchParams(location.search);
+    const quality = params.get('quality');
+    if (quality && QUALITY[quality]) APP.quality = quality;
+    const scene = params.get('scene');
+    if (scene && SCENES.some((s) => s.id === scene)) APP.sceneId = scene;
+  } catch { /* a file:// URL with no query is perfectly normal */ }
+}
 function start() {
+  applyUrlOptions();
   const canvas = document.getElementById('view');
   let gfx;
   try {
