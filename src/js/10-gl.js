@@ -171,7 +171,11 @@ class Gfx {
     gl.drawBuffers(bufs);
     const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new GLError(`Could not set up an off-screen buffer (0x${status.toString(16)}).`);
+      // Say which buffer, at what size, in what format. A bare status code tells
+      // whoever reads the crash nothing, and these only ever fail on odd drivers
+      // where reproducing it means knowing exactly what was being asked for.
+      const shape = `${targets.length}x ${targets.map((t) => t.internal).join('+')} at ${targets[0].w}x${targets[0].h}`;
+      throw new GLError(`Could not set up an off-screen buffer (0x${status.toString(16)}, ${shape}).`);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const rec = { fb, w: targets[0].w, h: targets[0].h, n: targets.length };
