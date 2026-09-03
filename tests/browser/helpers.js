@@ -22,11 +22,19 @@ export async function openApp({ width = 480, height = 360, quality = 'low' } = {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(pathToFileURL(APP_FILE).href);
   await page.waitForFunction(() => !!window.PowderToy, null, { timeout: 60000 });
-  // Software rendering: keep the picture tiny and stop the loop hogging the GPU.
   await page.evaluate((q) => {
     const P = window.PowderToy;
     P.app.halt = true;
     P.controls.setQuality(q);
+    // Pin the effort ladder to the top of this preset. Left alone the sandbox opens on
+    // its most cautious rung and climbs only once it has seen quick frames, which a
+    // software rasteriser never produces - so the physics tests would otherwise be
+    // measuring the emergency settings rather than the solver anyone actually runs.
+    // Which matters: the pressure solve is what holds a grain up, so with too few
+    // sweeps a sand heap stands visibly shallower.
+    P.controls.setAutoDetail(false);
+    P.controls.setDetailRung(P.controls.detailCeiling);
+    // Software rendering: keep the picture tiny and stop the loop hogging the GPU.
     P.RENDER.scale = 0.3;
     P.RENDER.surfSteps = 70;
     P.RENDER.shadowSteps = 10;

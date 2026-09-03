@@ -136,8 +136,23 @@ scripts/windows-package.mjs builds the program, smoke-tests it, builds the insta
 ```
 
 `window.PowderToy` is exposed for the console and for the tests: the settings
-objects (`PHYSICS`, `RENDER`, `QUALITY`), the live `sim` and `renderer`, and
+objects (`PHYSICS`, `RENDER`, `QUALITY`, `DETAIL`), the live `sim` and `renderer`, and
 `advance(n)` / `drawOnce()` so the physics can be stepped without drawing.
+
+### Fitting the machine
+
+A graphics card that is asked for a frame it cannot finish quickly enough gets reset
+by the operating system, and the page dies with it - which looks from the outside like
+the program crashing on startup. So the sandbox never guesses. `DETAIL` is a ladder of
+per-frame effort; it always opens on the bottom rung and climbs only after watching
+frames go by quickly, then gives a rung back at the first sign of trouble and two if a
+frame runs long enough to be worrying. A quality preset sets the grid size and the
+ceiling on that ladder rather than the effort itself.
+
+If a run does die anyway, the next one notices the note left in `localStorage` and
+opens in safe mode; a lost context is caught, the extensions re-requested (a restored
+context is a new one, and grants nothing the old one had) and the sandbox rebuilt small
+rather than left as a dead end.
 
 Every setting in the panel is a real number in the solver, so you can turn gravity
 off, make water infinitely thin, or run the whole thing in slow motion. **Quality →

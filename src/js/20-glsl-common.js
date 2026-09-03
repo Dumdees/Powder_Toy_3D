@@ -65,8 +65,14 @@ vec4 sampleAt(sampler2D s, vec3 p, vec3 g, vec2 tiles, vec2 atlas) {
   float zc = clamp(p.z - 0.5, 0.0, g.z - 1.0);
   int z0 = int(zc);
   int z1 = min(z0 + 1, int(g.z) - 1);
-  return mix(texture(s, sliceUVOf(p.xy, z0, g, tiles, atlas)),
-             texture(s, sliceUVOf(p.xy, z1, g, tiles, atlas)), zc - float(z0));
+  // textureLod, not texture. Every caller is inside a ray-marching loop, and an
+  // implicit level of detail is worked out from derivatives, which GLSL ES leaves
+  // undefined in non-uniform control flow - which a loop full of break and continue
+  // certainly is. No grid texture has mipmaps, so level 0 is the only level there
+  // is: this asks for it outright rather than leaving a driver to guess, and saves
+  // it computing gradients per sample that it could not use anyway.
+  return mix(textureLod(s, sliceUVOf(p.xy, z0, g, tiles, atlas), 0.0),
+             textureLod(s, sliceUVOf(p.xy, z1, g, tiles, atlas), 0.0), zc - float(z0));
 }
 
 vec4 sampleGrid(sampler2D s, vec3 p) { return sampleAt(s, p, uGrid, uTiles, uAtlas); }

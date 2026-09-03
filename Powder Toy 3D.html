@@ -819,6 +819,22 @@ class Gfx {
     if (!gl) throw new GLError('This computer’s browser cannot do WebGL 2.');
     this.gl = gl;
     this.canvas = canvas;
+    this.programs = new Map();
+    this.owned = new Set();
+    this.adoptContext();
+  }
+  /**
+   * Take on the drawing context: ask for the extensions this app cannot work without,
+   * read its limits, and set the state that never changes afterwards.
+   *
+   * Called once at startup and again every time the driver resets and hands the
+   * context back, because a restored context is a new one in every way that matters.
+   * An extension granted to the old context is not granted to this one, and the first
+   * thing to notice would be RGBA16F quietly ceasing to be renderable - an incomplete
+   * framebuffer, from a line that has nothing to do with the real cause.
+   */
+  adoptContext() {
+    const gl = this.gl;
     if (!gl.getExtension('EXT_color_buffer_float')) {
       throw new GLError('This graphics card cannot render to floating point textures (EXT_color_buffer_float).');
     }
@@ -829,12 +845,19 @@ class Gfx {
     this.maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : 'unknown graphics card';
-    this.programs = new Map();
-    this.owned = new Set();
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.BLEND);
     gl.bindVertexArray(gl.createVertexArray());
+  }
+  /**
+   * The context has gone and taken every object with it. Let the handles go without
+   * deleting them: deleting an object belonging to a dead context is an error in its
+   * own right, and a few hundred of those would bury whatever really went wrong.
+   */
+  forgetContext() {
+    this.programs.clear();
+    this.owned.clear();
   }
   compile(type, src, name) {
     const gl = this.gl;
@@ -1091,8 +1114,14 @@ vec4 sampleAt(sampler2D s, vec3 p, vec3 g, vec2 tiles, vec2 atlas) {
   float zc = clamp(p.z - 0.5, 0.0, g.z - 1.0);
   int z0 = int(zc);
   int z1 = min(z0 + 1, int(g.z) - 1);
-  return mix(texture(s, sliceUVOf(p.xy, z0, g, tiles, atlas)),
-             texture(s, sliceUVOf(p.xy, z1, g, tiles, atlas)), zc - float(z0));
+  // textureLod, not texture. Every caller is inside a ray-marching loop, and an
+  // implicit level of detail is worked out from derivatives, which GLSL ES leaves
+  // undefined in non-uniform control flow - which a loop full of break and continue
+  // certainly is. No grid texture has mipmaps, so level 0 is the only level there
+  // is: this asks for it outright rather than leaving a driver to guess, and saves
+  // it computing gradients per sample that it could not use anyway.
+  return mix(textureLod(s, sliceUVOf(p.xy, z0, g, tiles, atlas), 0.0),
+             textureLod(s, sliceUVOf(p.xy, z1, g, tiles, atlas), 0.0), zc - float(z0));
 }
 
 vec4 sampleGrid(sampler2D s, vec3 p) { return sampleAt(s, p, uGrid, uTiles, uAtlas); }
@@ -2047,7 +2076,13 @@ Hit marchSurface(vec3 ro, vec3 rd, float t0, float t1) {
   h.hit = false;
   h.t = t1;
   float t = t0;
-  for (int i = 0; i < 512; i++) {
+  // 256 is the ceiling the compiler has to plan for, and it is chosen to be just
+  // past the worst case: the long diagonal of the largest grid is 80*sqrt(3) = 139
+  // cells, or 252 steps at the shortest step length the panel offers. A far larger
+  // bound buys nothing and costs a great deal - a driver's shader compiler reasons
+  // about the whole loop body, and this one is called again inside the caustics
+  // pass, four times over.
+  for (int i = 0; i < 256; i++) {
     if (i >= uSurfSteps || t >= t1) break;
     vec3 p = ro + rd * t;
     if (coarseMax(p) < uIso) { t += blockExit(p, rd); continue; }
@@ -2084,7 +2119,7 @@ vec3 sunVisibility(vec3 p) {
   if (t1 <= t) return vec3(1.0);
   vec3 trans = vec3(1.0);
   float dt = 0.85;
-  for (int i = 0; i < 192; i++) {
+  for (int i = 0; i < 128; i++) {
     if (i >= uShadowSteps || t >= t1) break;
     vec3 q = p + rd * t;
     if (coarseMax(q) < uIso * 0.4) { t += blockExit(q, rd); continue; }
@@ -2227,7 +2262,7 @@ vec3 traceRefraction(vec3 p, vec3 n, vec3 rd, Surf s) {
     float far = boxRange(pos, dir, boxLo(), boxHi()).y;
     float d = 0.0;
     bool left = false;
-    for (int i = 0; i < 128; i++) {
+    for (int i = 0; i < 96; i++) {
       if (d >= far) break;
       d += 0.75;
       if (fillAt(pos + dir * d) < uIso) { left = true; break; }
@@ -2264,7 +2299,7 @@ vec4 gatherGas(vec3 ro, vec3 rd, float t0, float t1) {
   // fixed lattice draws the lattice; dithering turns that into noise, which the
   // temporal accumulation then averages away.
   t += dt * hash1(uint(gl_FragCoord.x) * 73856093u + uint(gl_FragCoord.y) * 19349663u + uFrameSeed);
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < 96; i++) {
     if (t >= t1 || trans < 0.01) break;
     vec3 q = ro + rd * t;
     if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
@@ -2317,7 +2352,7 @@ vec3 inspect(vec3 ro, vec3 rd, float t0, float t1, bool hit, float tHit, vec3 p,
   // Volume readouts: take the largest value seen along the ray.
   float best = 0.0;
   float t = t0;
-  for (int i = 0; i < 256; i++) {
+  for (int i = 0; i < 128; i++) {
     if (t >= min(t1, hit ? tHit + 1.0 : t1)) break;
     vec3 q = ro + rd * t;
     if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
@@ -2437,7 +2472,7 @@ void main() {
     // Cross the medium and refract out again.
     float d = 0.0;
     bool left = false;
-    for (int i = 0; i < 96; i++) {
+    for (int i = 0; i < 64; i++) {
       if (d > length(uGrid)) break;
       d += 0.8;
       if (fillAt(p + dir * d) < uIso) { left = true; break; }
@@ -2604,10 +2639,10 @@ const PHYSICS = {
   wallFriction: 0.88,
 };
 const QUALITY = {
-  low:    { grid: 48, particles: 1 << 16, iterations: 24, substeps: 2, scale: 0.55, photons: 128 },
-  medium: { grid: 64, particles: 1 << 17, iterations: 36, substeps: 2, scale: 0.75, photons: 192 },
-  high:   { grid: 64, particles: 1 << 18, iterations: 48, substeps: 3, scale: 1.0,  photons: 256 },
-  ultra:  { grid: 80, particles: 1 << 18, iterations: 64, substeps: 3, scale: 1.0,  photons: 320 },
+  low:    { grid: 48, particles: 1 << 16, detail: 2 },
+  medium: { grid: 64, particles: 1 << 17, detail: 4 },
+  high:   { grid: 64, particles: 1 << 18, detail: 5 },
+  ultra:  { grid: 80, particles: 1 << 18, detail: 6 },
 };
 const COARSE_SCALE = 4;
 class Sim {
@@ -3539,8 +3574,8 @@ function buildUI(ctx) {
     ]),
     group('Solver', [
       slider(PHYSICS, 'timeScale', { label: 'Speed', min: 0, max: 2 }),
-      slider(PHYSICS, 'substeps', { label: 'Steps per frame', min: 1, max: 4, step: 1, fmt: (v) => String(v) }),
-      slider(PHYSICS, 'iterations', { label: 'Pressure sweeps', min: 8, max: 80, step: 1, fmt: (v) => String(v) }),
+      slider(PHYSICS, 'substeps', { label: 'Steps per frame', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: () => ctx.manualDetail() }),
+      slider(PHYSICS, 'iterations', { label: 'Pressure sweeps', min: 8, max: 80, step: 1, fmt: (v) => String(v), onChange: () => ctx.manualDetail() }),
       slider(PHYSICS, 'flip', { label: 'Liveliness (FLIP)', min: 0, max: 1 }),
       slider(PHYSICS, 'pack', { label: 'Anti-clumping', min: 0, max: 4 }),
       slider(PHYSICS, 'packLimit', { label: 'Crowding limit', min: 1, max: 2.5 }),
@@ -3582,17 +3617,31 @@ function buildUI(ctx) {
   const viewSel = el('select', { onchange: (e) => { RENDER.view = Number(e.target.value); ctx.resetAccumulation(); } },
     VIEWS.map((name, i) => el('option', { value: i, text: name })));
   const info = el('p', { class: 'note' });
+  const byHand = () => { ctx.manualDetail(); dirty(); };
+  const autoInput = el('input', { type: 'checkbox' });
+  autoInput.checked = ctx.autoDetail;
+  autoInput.addEventListener('change', () => ctx.setAutoDetail(autoInput.checked));
+  const autoRow = el('div', { class: 'row' }, [
+    el('label', { text: 'Match the speed of this computer' }), autoInput,
+  ]);
+  const safeNote = el('p', {
+    class: 'note',
+    text: 'Started with less detail, because the last run did not finish. Choose a preset above to ask for more.',
+  });
+  safeNote.hidden = !ctx.safeMode;
   $('page-quality').append(
     group('Detail', [
       el('div', { class: 'row' }, [el('label', { text: 'Preset' }), presetSel]),
       el('div', { class: 'row' }, [el('label', { text: 'Show' }), viewSel]),
-      slider(RENDER, 'scale', { label: 'Render resolution', min: 0.3, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%', onChange: () => ctx.rescale() }),
-      slider(RENDER, 'surfSteps', { label: 'Ray steps', min: 40, max: 400, step: 10, fmt: (v) => String(v), onChange: dirty }),
-      slider(RENDER, 'shadowSteps', { label: 'Shadow steps', min: 4, max: 128, step: 4, fmt: (v) => String(v), onChange: dirty }),
+      autoRow,
+      slider(RENDER, 'scale', { label: 'Render resolution', min: 0.3, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%', onChange: () => { byHand(); ctx.rescale(); } }),
+      slider(RENDER, 'surfSteps', { label: 'Ray steps', min: 40, max: 256, step: 8, fmt: (v) => String(v), onChange: byHand }),
+      slider(RENDER, 'shadowSteps', { label: 'Shadow steps', min: 4, max: 128, step: 4, fmt: (v) => String(v), onChange: byHand }),
       slider(RENDER, 'surfStep', { label: 'Step length', min: 0.2, max: 1.2, fmt: (v) => v.toFixed(2) + ' cells', onChange: dirty }),
-      slider(RENDER, 'photons', { label: 'Caustic photons', min: 64, max: 384, step: 32, fmt: (v) => (v * v / 1000).toFixed(0) + 'k', onChange: dirty }),
-      slider(RENDER, 'smoothing', { label: 'Surface smoothing', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: dirty }),
+      slider(RENDER, 'photons', { label: 'Caustic photons', min: 64, max: 256, step: 32, fmt: (v) => (v * v / 1000).toFixed(0) + 'k', onChange: byHand }),
+      slider(RENDER, 'smoothing', { label: 'Surface smoothing', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: byHand }),
     ]),
+    safeNote,
     info,
   );
   $('btn-play').addEventListener('click', ctx.togglePlay);
@@ -3635,9 +3684,15 @@ function buildUI(ctx) {
     setScene(id) { for (const [sid, b] of sceneButtons) b.classList.toggle('is-on', sid === id); },
     setRadius(r) { sizeInput.value = String(r); sizeOut.textContent = r.toFixed(r < 10 ? 1 : 0); },
     setQuality(q) { presetSel.value = q; },
-    refresh() { for (const sync of syncers) sync(); },
+    refresh() {
+      for (const sync of syncers) sync();
+      autoInput.checked = ctx.autoDetail;
+      safeNote.hidden = !ctx.safeMode;
+    },
     setInfo(text) { info.textContent = text; },
     rescaleSlider() { /* value already lives in RENDER */ },
+    autoDetail(on) { autoInput.checked = !!on; },
+    safeMode(on) { safeNote.hidden = !on; },
     readout(html) { $('readout').innerHTML = html; },
     playing(on) { $('btn-play').classList.toggle('is-paused', !on); $('btn-play').querySelector('.lbl').textContent = on ? 'Pause' : 'Play'; },
     panel(on) { $('panel').hidden = !on; },
@@ -3654,19 +3709,66 @@ const APP = {
   helpOpen: false,
   stepOnce: false,
   halt: false,
+  safe: false,        // started small because the last run did not survive
   cursor: [0.5, 0.5],
 };
-function fatal(message, detail) {
+/**
+ * How much work one frame is allowed to be, from the most cautious rung to the most
+ * lavish. The sandbox always starts on rung 0 and climbs only once it has watched a
+ * few frames go by quickly, because the alternative is what this ladder exists to
+ * prevent: asking an unknown graphics card for a full-detail frame, having it take
+ * several seconds, and having Windows decide the driver has hung and reset it. That
+ * reset takes the whole page down with it, which looks to the person sitting there
+ * like the program crashed on startup - a black window and nothing else.
+ *
+ * So the first frame is deliberately cheap. A capable card climbs to the top in well
+ * under a second and nobody notices; a weak one settles where it can actually keep up.
+ */
+const DETAIL = [
+  { scale: 0.30, surfSteps: 48,  shadowSteps: 8,  photons: 64,  smoothing: 1, substeps: 1, iterations: 24 },
+  { scale: 0.40, surfSteps: 72,  shadowSteps: 14, photons: 96,  smoothing: 2, substeps: 1, iterations: 26 },
+  { scale: 0.50, surfSteps: 100, shadowSteps: 20, photons: 128, smoothing: 2, substeps: 2, iterations: 28 },
+  { scale: 0.62, surfSteps: 128, shadowSteps: 28, photons: 160, smoothing: 3, substeps: 2, iterations: 32 },
+  { scale: 0.75, surfSteps: 160, shadowSteps: 40, photons: 192, smoothing: 3, substeps: 2, iterations: 36 },
+  { scale: 0.90, surfSteps: 200, shadowSteps: 48, photons: 224, smoothing: 3, substeps: 3, iterations: 48 },
+  { scale: 1.00, surfSteps: 240, shadowSteps: 56, photons: 256, smoothing: 3, substeps: 3, iterations: 60 },
+];
+const PACE = { fast: 26, slow: 90, stall: 400, desperate: 700 };
+/**
+ * Where the sandbox remembers, between runs, that it did not survive the last one.
+ * Written before the first frame and cleared once the loop has been up for a couple
+ * of seconds, so a start that dies part way leaves the note behind for next time.
+ * localStorage is refused for a file:// page in some browsers, which is why every
+ * touch is wrapped: the ladder above still protects a double-clicked file, this only
+ * adds the memory across runs that the installed program gets.
+ */
+const BOOT_KEY = 'powdertoy3d.boot';
+const readBoot = () => { try { return localStorage.getItem(BOOT_KEY); } catch { return null; } };
+const writeBoot = (v) => { try { if (v) localStorage.setItem(BOOT_KEY, v); else localStorage.removeItem(BOOT_KEY); } catch { /* private mode, or a file:// page */ } };
+/**
+ * Put a message in place of the sandbox. `heading` and `advice` are what separate a
+ * dead end from a pause: a driver that has reset and is being started again is not a
+ * computer that cannot run this, and should not be told that it is.
+ *
+ * Note the filter. Element.append() turns a null into the text "null" rather than
+ * skipping it, which is not what any of the callers mean by leaving a part out.
+ */
+function banner(heading, message, detail, advice) {
   const box = document.getElementById('boot');
   box.hidden = false;
   box.innerHTML = '';
-  box.append(
-    el('h1', { text: 'Powder Toy 3D cannot start' }),
+  box.append(...[
+    el('h1', { text: heading }),
     el('p', { text: message }),
     detail ? el('p', { html: '<code>' + String(detail).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])) + '</code>' }) : null,
-    el('p', { text: 'It needs WebGL 2 with floating point render targets - any graphics card from the last ten years, in an up to date Chrome, Edge, Firefox or Safari.' }),
-  );
+    advice ? el('p', { text: advice }) : null,
+  ].filter(Boolean));
   document.getElementById('ui').hidden = true;
+}
+function fatal(message, detail) {
+  banner('Powder Toy 3D cannot start', message, detail,
+    'It needs WebGL 2 with floating point render targets - any graphics card from the last ten years, '
+    + 'in an up to date Chrome, Edge, Firefox or Safari.');
 }
 /**
  * Let the address bar choose the detail level and the opening scene:
@@ -3681,10 +3783,14 @@ function applyUrlOptions() {
     if (quality && QUALITY[quality]) APP.quality = quality;
     const scene = params.get('scene');
     if (scene && SCENES.some((s) => s.id === scene)) APP.sceneId = scene;
+    if (params.get('safe') === '1') APP.safe = true;
   } catch { /* a file:// URL with no query is perfectly normal */ }
 }
 function start() {
   applyUrlOptions();
+  if (readBoot()) APP.safe = true;
+  if (APP.safe) APP.quality = 'low';
+  writeBoot('starting');
   const canvas = document.getElementById('view');
   let gfx;
   try {
@@ -3702,13 +3808,40 @@ function start() {
   let fpsClock = performance.now();
   let fps = 60;
   let lastTime = performance.now();
-  let gpuBudget = 0;
+  const perf = { auto: true, rung: 0, fast: 0, slow: 0, settle: 0 };
+  let openedAtRung = 0;
+  const startedAt = performance.now();
+  let bootCleared = false;
+  /** The highest rung this preset allows; a preset is a ceiling, not a setting. */
+  const detailCeiling = () => Math.min(DETAIL.length - 1, QUALITY[APP.quality].detail);
+  /**
+   * Put a rung into effect. Everything here is per-frame effort, so it can change at
+   * any moment without rebuilding anything - which is the point, as the alternative
+   * to backing off quickly is a driver reset.
+   */
+  function applyDetail(rung, { resize = true } = {}) {
+    perf.rung = clamp(Math.round(rung), 0, detailCeiling());
+    const d = DETAIL[perf.rung];
+    const before = RENDER.scale;
+    RENDER.scale = d.scale;
+    RENDER.surfSteps = d.surfSteps;
+    RENDER.shadowSteps = d.shadowSteps;
+    RENDER.photons = d.photons;
+    RENDER.smoothing = d.smoothing;
+    PHYSICS.substeps = d.substeps;
+    PHYSICS.iterations = d.iterations;
+    if (renderer) {
+      if (resize && before !== RENDER.scale) sizeCanvas(true);
+      renderer.reset();
+    }
+    perf.settle = 2;  // the frame that changes size is slow for reasons of its own
+    perf.fast = 0;
+    perf.slow = 0;
+    if (ui) ui.refresh();
+  }
   const build = () => {
     const Q = QUALITY[APP.quality];
-    PHYSICS.iterations = Q.iterations;
-    PHYSICS.substeps = Q.substeps;
-    RENDER.scale = Q.scale;
-    RENDER.photons = Q.photons;
+    applyDetail(Math.min(perf.rung, Q.detail), { resize: false });
     gfx.releaseAll();
     sim = new Sim(gfx, { grid: Q.grid, particles: Q.particles });
     renderer = new Renderer(gfx, sim);
@@ -3783,8 +3916,26 @@ function start() {
     setTool(id) { brush.tool = id; brush.depth = 0; ui.setTool(id); },
     setRadius(r) { brush.radius = clamp(Number(r) || 1, 1, 24); ui.setRadius(brush.radius); },
     loadScene(id) { loadScene(id); },
-    setQuality(q) { if (QUALITY[q]) { APP.quality = q; ui.setQuality(q); build(); ui.refresh(); } },
+    setQuality(q) {
+      if (!QUALITY[q]) return;
+      APP.quality = q;
+      APP.safe = false;
+      perf.auto = true;
+      ui.setQuality(q);
+      build();
+      ui.refresh();
+    },
     rescale() { sizeCanvas(true); renderer.reset(); },
+    get autoDetail() { return perf.auto; },
+    setAutoDetail(on) { perf.auto = !!on; perf.fast = 0; perf.slow = 0; perf.settle = 2; },
+    /** A slider was moved by hand, so stop second-guessing it. */
+    manualDetail() { perf.auto = false; if (ui) ui.autoDetail(false); },
+    get safeMode() { return APP.safe; },
+    get detailRung() { return perf.rung; },
+    get detailCeiling() { return detailCeiling(); },
+    get openedAtRung() { return openedAtRung; },
+    setDetailRung(r) { applyDetail(r); },
+    feedFrameTime(ms) { perf.settle = 0; govern(ms); },
     resetAccumulation() { renderer.reset(); },
     togglePlay() { APP.playing = !APP.playing; ui.playing(APP.playing); renderer.reset(); },
     stepOnce() { APP.stepOnce = true; APP.playing = false; ui.playing(false); },
@@ -3815,6 +3966,7 @@ function start() {
     fatal('The sandbox could not set up its simulation on this graphics card.', err && err.message);
     return;
   }
+  openedAtRung = perf.rung;
   document.getElementById('ui').hidden = false;
   ui = buildUI(ctx);
   ui.setMaterial(brush.material);
@@ -3828,7 +3980,28 @@ function start() {
   addEventListener('resize', () => sizeCanvas(false));
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
-    fatal('The graphics driver reset while the sandbox was running. Reload the page to carry on.');
+    APP.halt = true;
+    APP.safe = true;
+    writeBoot('lost');
+    bootCleared = true;   // leave the note behind; the next run should open small
+    banner('Just a moment', 'The graphics card had to reset. Starting the sandbox again with less detail...');
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    try {
+      gfx.forgetContext();
+      gfx.adoptContext();
+      APP.quality = 'low';
+      perf.auto = true;
+      applyDetail(0, { resize: false });
+      build();
+      document.getElementById('boot').hidden = true;
+      document.getElementById('ui').hidden = false;
+      if (ui) { ui.setQuality('low'); ui.refresh(); }
+      APP.halt = false;
+      lastTime = performance.now();
+    } catch (err) {
+      fatal('The graphics card had to reset and the sandbox could not start again.', err && err.message);
+    }
   });
   /** Rebuild the fields, refresh the caustics, pick, and put a frame on screen. */
   function drawOnce(aspect, settled) {
@@ -3850,7 +4023,8 @@ function start() {
   function frame(now) {
     requestAnimationFrame(frame);
     if (APP.halt || document.hidden) { lastTime = now; return; }
-    const dtReal = Math.min(0.1, Math.max(1e-4, (now - lastTime) / 1000));
+    const periodMs = now - lastTime;
+    const dtReal = Math.min(0.1, Math.max(1e-4, periodMs / 1000));
     lastTime = now;
     sizeCanvas(false);
     const aspect = Math.max(0.2, canvas.clientWidth / Math.max(1, canvas.clientHeight));
@@ -3873,6 +4047,8 @@ function start() {
     wasSettled = settled;
     cam.moved = false;
     drawOnce(aspect, settled);
+    govern(periodMs);
+    if (!bootCleared && now - startedAt > 2500) { bootCleared = true; writeBoot(null); }
     frames++;
     if (now - fpsClock > 400) {
       fps = frames * 1000 / (now - fpsClock);
@@ -3885,17 +4061,50 @@ function start() {
         + `<span class="opt"><b>${(sim.activeCount / 1000).toFixed(0)}k</b> specks (${pct}%)</span>`
         + `<span class="opt"><b>${sim.time.toFixed(1)}</b> s simulated</span>`
         + `<span class="opt">${sim.n.nx}³ grid</span>`);
-      if (fps < 24 && RENDER.scale > 0.4 && gpuBudget++ > 3) {
-        RENDER.scale = Math.max(0.4, RENDER.scale - 0.1);
-        sizeCanvas(true);
-        ui.refresh();
-        gpuBudget = 0;
-      } else if (fps > 55) gpuBudget = 0;
     }
   }
+  /**
+   * Watch how long frames actually take and move up or down the ladder to suit.
+   *
+   * Coming down is deliberately far quicker than going up. A frame that overruns
+   * badly is a frame that nearly became a driver reset, so that costs a rung at once
+   * on the evidence of one frame; earning a rung back takes a run of quick ones.
+   */
+  function govern(periodMs) {
+    if (!perf.auto) return;
+    if (perf.settle > 0) { perf.settle--; return; }
+    const ceiling = detailCeiling();
+    if (periodMs > PACE.stall) {
+      if (perf.rung > 0) { applyDetail(perf.rung - 2); return; }
+      if (!bootCleared && periodMs > PACE.desperate && APP.quality !== 'low') {
+        APP.quality = 'low';
+        APP.safe = true;
+        build();
+        if (ui) { ui.setQuality('low'); ui.refresh(); }
+      }
+      return;
+    }
+    if (periodMs > PACE.slow) {
+      perf.fast = 0;
+      if (++perf.slow >= 3 && perf.rung > 0) applyDetail(perf.rung - 1);
+      return;
+    }
+    if (periodMs < PACE.fast) {
+      perf.slow = 0;
+      if (++perf.fast >= 18 && perf.rung < ceiling) applyDetail(perf.rung + 1);
+      return;
+    }
+    if (perf.fast > 0) perf.fast--;
+    if (perf.slow > 0) perf.slow--;
+  }
+  lastTime = performance.now();
   requestAnimationFrame(frame);
+  addEventListener('visibilitychange', () => {
+    lastTime = performance.now();
+    perf.settle = 2;
+  });
   window.PowderToy = {
-    PHYSICS, RENDER, QUALITY, MATERIALS, SCENES, TOOLS, brush, app: APP, controls: ctx,
+    PHYSICS, RENDER, QUALITY, DETAIL, MATERIALS, SCENES, TOOLS, brush, app: APP, controls: ctx,
     get sim() { return sim; },
     get renderer() { return renderer; },
     get camera() { return cam; },

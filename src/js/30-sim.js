@@ -32,11 +32,15 @@ const PHYSICS = {
   wallFriction: 0.88,
 };
 
+// A preset fixes the two things that need everything rebuilt - how many cells and how
+// many specks - and sets a ceiling on DETAIL, the ladder of per-frame effort that the
+// sandbox climbs by itself once it has seen how fast the machine really is. Nothing
+// here is applied to a frame directly; see applyDetail() in 90-main.js.
 const QUALITY = {
-  low:    { grid: 48, particles: 1 << 16, iterations: 24, substeps: 2, scale: 0.55, photons: 128 },
-  medium: { grid: 64, particles: 1 << 17, iterations: 36, substeps: 2, scale: 0.75, photons: 192 },
-  high:   { grid: 64, particles: 1 << 18, iterations: 48, substeps: 3, scale: 1.0,  photons: 256 },
-  ultra:  { grid: 80, particles: 1 << 18, iterations: 64, substeps: 3, scale: 1.0,  photons: 320 },
+  low:    { grid: 48, particles: 1 << 16, detail: 2 },
+  medium: { grid: 64, particles: 1 << 17, detail: 4 },
+  high:   { grid: 64, particles: 1 << 18, detail: 5 },
+  ultra:  { grid: 80, particles: 1 << 18, detail: 6 },
 };
 
 const COARSE_SCALE = 4;

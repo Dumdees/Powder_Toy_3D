@@ -109,8 +109,8 @@ function buildUI(ctx) {
     ]),
     group('Solver', [
       slider(PHYSICS, 'timeScale', { label: 'Speed', min: 0, max: 2 }),
-      slider(PHYSICS, 'substeps', { label: 'Steps per frame', min: 1, max: 4, step: 1, fmt: (v) => String(v) }),
-      slider(PHYSICS, 'iterations', { label: 'Pressure sweeps', min: 8, max: 80, step: 1, fmt: (v) => String(v) }),
+      slider(PHYSICS, 'substeps', { label: 'Steps per frame', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: () => ctx.manualDetail() }),
+      slider(PHYSICS, 'iterations', { label: 'Pressure sweeps', min: 8, max: 80, step: 1, fmt: (v) => String(v), onChange: () => ctx.manualDetail() }),
       slider(PHYSICS, 'flip', { label: 'Liveliness (FLIP)', min: 0, max: 1 }),
       slider(PHYSICS, 'pack', { label: 'Anti-clumping', min: 0, max: 4 }),
       slider(PHYSICS, 'packLimit', { label: 'Crowding limit', min: 1, max: 2.5 }),
@@ -156,17 +156,35 @@ function buildUI(ctx) {
   const viewSel = el('select', { onchange: (e) => { RENDER.view = Number(e.target.value); ctx.resetAccumulation(); } },
     VIEWS.map((name, i) => el('option', { value: i, text: name })));
   const info = el('p', { class: 'note' });
+  // Everything below is also driven automatically, so moving one by hand has to stop
+  // the sandbox from moving it back a moment later.
+  const byHand = () => { ctx.manualDetail(); dirty(); };
+  const autoInput = el('input', { type: 'checkbox' });
+  autoInput.checked = ctx.autoDetail;
+  autoInput.addEventListener('change', () => ctx.setAutoDetail(autoInput.checked));
+  const autoRow = el('div', { class: 'row' }, [
+    el('label', { text: 'Match the speed of this computer' }), autoInput,
+  ]);
+  const safeNote = el('p', {
+    class: 'note',
+    text: 'Started with less detail, because the last run did not finish. Choose a preset above to ask for more.',
+  });
+  safeNote.hidden = !ctx.safeMode;
   $('page-quality').append(
     group('Detail', [
       el('div', { class: 'row' }, [el('label', { text: 'Preset' }), presetSel]),
       el('div', { class: 'row' }, [el('label', { text: 'Show' }), viewSel]),
-      slider(RENDER, 'scale', { label: 'Render resolution', min: 0.3, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%', onChange: () => ctx.rescale() }),
-      slider(RENDER, 'surfSteps', { label: 'Ray steps', min: 40, max: 400, step: 10, fmt: (v) => String(v), onChange: dirty }),
-      slider(RENDER, 'shadowSteps', { label: 'Shadow steps', min: 4, max: 128, step: 4, fmt: (v) => String(v), onChange: dirty }),
+      autoRow,
+      // These ceilings are not free choices: they are the loop limits compiled into
+      // the tracer. Offering more here would quietly do nothing.
+      slider(RENDER, 'scale', { label: 'Render resolution', min: 0.3, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%', onChange: () => { byHand(); ctx.rescale(); } }),
+      slider(RENDER, 'surfSteps', { label: 'Ray steps', min: 40, max: 256, step: 8, fmt: (v) => String(v), onChange: byHand }),
+      slider(RENDER, 'shadowSteps', { label: 'Shadow steps', min: 4, max: 128, step: 4, fmt: (v) => String(v), onChange: byHand }),
       slider(RENDER, 'surfStep', { label: 'Step length', min: 0.2, max: 1.2, fmt: (v) => v.toFixed(2) + ' cells', onChange: dirty }),
-      slider(RENDER, 'photons', { label: 'Caustic photons', min: 64, max: 384, step: 32, fmt: (v) => (v * v / 1000).toFixed(0) + 'k', onChange: dirty }),
-      slider(RENDER, 'smoothing', { label: 'Surface smoothing', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: dirty }),
+      slider(RENDER, 'photons', { label: 'Caustic photons', min: 64, max: 256, step: 32, fmt: (v) => (v * v / 1000).toFixed(0) + 'k', onChange: byHand }),
+      slider(RENDER, 'smoothing', { label: 'Surface smoothing', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: byHand }),
     ]),
+    safeNote,
     info,
   );
 
@@ -215,9 +233,15 @@ function buildUI(ctx) {
     setScene(id) { for (const [sid, b] of sceneButtons) b.classList.toggle('is-on', sid === id); },
     setRadius(r) { sizeInput.value = String(r); sizeOut.textContent = r.toFixed(r < 10 ? 1 : 0); },
     setQuality(q) { presetSel.value = q; },
-    refresh() { for (const sync of syncers) sync(); },
+    refresh() {
+      for (const sync of syncers) sync();
+      autoInput.checked = ctx.autoDetail;
+      safeNote.hidden = !ctx.safeMode;
+    },
     setInfo(text) { info.textContent = text; },
     rescaleSlider() { /* value already lives in RENDER */ },
+    autoDetail(on) { autoInput.checked = !!on; },
+    safeMode(on) { safeNote.hidden = !on; },
     readout(html) { $('readout').innerHTML = html; },
     playing(on) { $('btn-play').classList.toggle('is-paused', !on); $('btn-play').querySelector('.lbl').textContent = on ? 'Pause' : 'Play'; },
     panel(on) { $('panel').hidden = !on; },

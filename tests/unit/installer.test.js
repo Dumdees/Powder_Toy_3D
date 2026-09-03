@@ -139,6 +139,27 @@ test('the window can ask the page to start small, and the page listens', async (
   assert.match(sim, /\blow:\s*\{/, 'there is no low preset for the host to ask for');
 });
 
+test('a crash reopens the sandbox smaller instead of closing the window', async () => {
+  // The drawing process dying is nearly always the graphics driver being asked for more
+  // than it could finish. Closing the program leaves the person with a window that never
+  // opens, because the next run does exactly the same thing - so the host reloads in safe
+  // mode, and the page has to understand what it is being asked for. Neither compiler
+  // checks that these two agree.
+  assert.match(mainForm, /ProcessFailed \+= OnProcessFailed/, 'the host does not handle the drawing process dying');
+  assert.match(mainForm, /\?quality=low&safe=1/, 'the host never asks the page for safe mode');
+  assert.match(mainForm, /if \(_smoke \|\| _safe\)/,
+    'a second crash must give up; retrying for ever is worse than an honest failure');
+  const main = await read('src/js/90-main.js');
+  assert.match(main, /params\.get\('safe'\) === '1'/, 'the page ignores the safe mode the host asks for');
+  assert.match(main, /if \(APP\.safe\) APP\.quality = 'low'/, 'safe mode does not actually reduce anything');
+  // And the page must reach the same conclusion on its own, for a browser with no host.
+  assert.match(main, /if \(readBoot\(\)\) APP\.safe = true/,
+    'the page does not notice that its own last run failed to finish');
+  assert.match(main, /webglcontextrestored/, 'a driver reset is never recovered from');
+  assert.match(main, /gfx\.adoptContext\(\)/,
+    'a restored context needs its extensions asked for again, or float targets stop working');
+});
+
 test('the host only subscribes to events that exist on CoreWebView2', () => {
   // A spelling check against the .NET surface. Anything not on this list is either a typo
   // or lives on another class; either way it costs a five-minute Windows build to find out.

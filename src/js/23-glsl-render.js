@@ -124,7 +124,13 @@ Hit marchSurface(vec3 ro, vec3 rd, float t0, float t1) {
   h.hit = false;
   h.t = t1;
   float t = t0;
-  for (int i = 0; i < 512; i++) {
+  // 256 is the ceiling the compiler has to plan for, and it is chosen to be just
+  // past the worst case: the long diagonal of the largest grid is 80*sqrt(3) = 139
+  // cells, or 252 steps at the shortest step length the panel offers. A far larger
+  // bound buys nothing and costs a great deal - a driver's shader compiler reasons
+  // about the whole loop body, and this one is called again inside the caustics
+  // pass, four times over.
+  for (int i = 0; i < 256; i++) {
     if (i >= uSurfSteps || t >= t1) break;
     vec3 p = ro + rd * t;
     if (coarseMax(p) < uIso) { t += blockExit(p, rd); continue; }
@@ -161,7 +167,7 @@ vec3 sunVisibility(vec3 p) {
   if (t1 <= t) return vec3(1.0);
   vec3 trans = vec3(1.0);
   float dt = 0.85;
-  for (int i = 0; i < 192; i++) {
+  for (int i = 0; i < 128; i++) {
     if (i >= uShadowSteps || t >= t1) break;
     vec3 q = p + rd * t;
     if (coarseMax(q) < uIso * 0.4) { t += blockExit(q, rd); continue; }
@@ -304,7 +310,7 @@ vec3 traceRefraction(vec3 p, vec3 n, vec3 rd, Surf s) {
     float far = boxRange(pos, dir, boxLo(), boxHi()).y;
     float d = 0.0;
     bool left = false;
-    for (int i = 0; i < 128; i++) {
+    for (int i = 0; i < 96; i++) {
       if (d >= far) break;
       d += 0.75;
       if (fillAt(pos + dir * d) < uIso) { left = true; break; }
@@ -341,7 +347,7 @@ vec4 gatherGas(vec3 ro, vec3 rd, float t0, float t1) {
   // fixed lattice draws the lattice; dithering turns that into noise, which the
   // temporal accumulation then averages away.
   t += dt * hash1(uint(gl_FragCoord.x) * 73856093u + uint(gl_FragCoord.y) * 19349663u + uFrameSeed);
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < 96; i++) {
     if (t >= t1 || trans < 0.01) break;
     vec3 q = ro + rd * t;
     if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
@@ -396,7 +402,7 @@ vec3 inspect(vec3 ro, vec3 rd, float t0, float t1, bool hit, float tHit, vec3 p,
   // Volume readouts: take the largest value seen along the ray.
   float best = 0.0;
   float t = t0;
-  for (int i = 0; i < 256; i++) {
+  for (int i = 0; i < 128; i++) {
     if (t >= min(t1, hit ? tHit + 1.0 : t1)) break;
     vec3 q = ro + rd * t;
     if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
@@ -521,7 +527,7 @@ void main() {
     // Cross the medium and refract out again.
     float d = 0.0;
     bool left = false;
-    for (int i = 0; i < 96; i++) {
+    for (int i = 0; i < 64; i++) {
       if (d > length(uGrid)) break;
       d += 0.8;
       if (fillAt(p + dir * d) < uIso) { left = true; break; }

@@ -37,9 +37,25 @@ Heat to chill instead of warm.
 
 IF IT RUNS SLOWLY
 
-Open the settings (Tab), go to Quality, and choose the Low preset. The render
-resolution slider below it is the other dial that matters. The sandbox also
-lowers its own resolution automatically if it drops below 24 frames a second.
+It should already have sorted itself out. The sandbox opens deliberately small
+and only asks for more once it has watched a few frames go by quickly, so it
+settles at whatever this computer can actually keep up with. That is why the
+first second or so looks soft before it sharpens up.
+
+If you would rather set it yourself, open the settings (Tab), go to Quality,
+and turn off "Match the speed of this computer". The Low preset and the render
+resolution slider are then the two dials that matter.
+
+IF IT CLOSES OR GOES BLANK BY ITSELF
+
+Almost always the graphics driver being asked for more than it could manage in
+one go; Windows resets it and everything using it stops. The sandbox notices,
+starts again with less detail, and says so. If it happens twice in a row it
+will stop rather than keep trying, and Windows Update is the next thing to try
+- a newer graphics driver usually settles it.
+
+To go back to full detail after that, open the settings (Tab), go to Quality
+and pick a preset.
 
 IF IT WILL NOT START AT ALL
 

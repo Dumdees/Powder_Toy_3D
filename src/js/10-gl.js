@@ -18,6 +18,23 @@ class Gfx {
     if (!gl) throw new GLError('This computer’s browser cannot do WebGL 2.');
     this.gl = gl;
     this.canvas = canvas;
+    this.programs = new Map();
+    this.owned = new Set();
+    this.adoptContext();
+  }
+
+  /**
+   * Take on the drawing context: ask for the extensions this app cannot work without,
+   * read its limits, and set the state that never changes afterwards.
+   *
+   * Called once at startup and again every time the driver resets and hands the
+   * context back, because a restored context is a new one in every way that matters.
+   * An extension granted to the old context is not granted to this one, and the first
+   * thing to notice would be RGBA16F quietly ceasing to be renderable - an incomplete
+   * framebuffer, from a line that has nothing to do with the real cause.
+   */
+  adoptContext() {
+    const gl = this.gl;
     if (!gl.getExtension('EXT_color_buffer_float')) {
       throw new GLError('This graphics card cannot render to floating point textures (EXT_color_buffer_float).');
     }
@@ -28,13 +45,21 @@ class Gfx {
     this.maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : 'unknown graphics card';
-    this.programs = new Map();
-    this.owned = new Set();
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.BLEND);
     // WebGL2 needs *some* vertex array bound; nothing is ever attached to it.
     gl.bindVertexArray(gl.createVertexArray());
+  }
+
+  /**
+   * The context has gone and taken every object with it. Let the handles go without
+   * deleting them: deleting an object belonging to a dead context is an error in its
+   * own right, and a few hundred of those would bury whatever really went wrong.
+   */
+  forgetContext() {
+    this.programs.clear();
+    this.owned.clear();
   }
 
   compile(type, src, name) {

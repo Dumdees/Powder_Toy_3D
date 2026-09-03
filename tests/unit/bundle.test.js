@@ -5,6 +5,8 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { bundle, readChunks, squeeze, ROOT, OUT_FILE, SRC_DIR } from '../../build.mjs';
 
+const read = (rel) => readFile(path.join(ROOT, rel), 'utf8');
+
 const html = await bundle();
 const script = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
 
@@ -95,4 +97,74 @@ test('the committed single-file build is up to date', async () => {
   const onDisk = await readFile(OUT_FILE, 'utf8').catch(() => null);
   assert.ok(onDisk !== null, `${path.relative(ROOT, OUT_FILE)} has not been built`);
   assert.equal(onDisk, html, 'run "npm run build" and commit the result');
+});
+
+// ---------------------------------------------------------------------------
+// The tracer's loop limits are compile-time constants, so a slider that offers
+// more than one of them promises detail the shader will silently decline to
+// produce. They also cost real money: a driver's shader compiler reasons about
+// the whole loop body, and the surface march appears again inside the caustics
+// pass, four times over. Keeping the two in step is the point of these.
+test('no quality slider offers more than the shader will actually do', async () => {
+  const render = await read('src/js/23-glsl-render.js');
+  const ui = await read('src/js/70-ui.js');
+
+  // Pull the number out of the slider row rather than building a regex around the
+  // key, which is fiddly to escape and easy to get subtly wrong.
+  const sliderMax = (key) => {
+    const at = ui.indexOf(`slider(RENDER, '${key}',`);
+    assert.ok(at > 0, `no ${key} slider`);
+    const row = ui.slice(at, ui.indexOf('\n', at));
+    return Number(row.match(/max: (\d+)/)[1]);
+  };
+  // The loop bound is the number in the `for` that stands immediately above the line
+  // where the uniform stops it early.
+  const capBefore = (guard) => {
+    const at = render.indexOf(guard);
+    assert.ok(at > 0, `could not find ${guard}`);
+    return Number(render.slice(0, at).match(/for \(int i = 0; i < (\d+); i\+\+\) \{\s*$/m)[1]);
+  };
+  const surfCap = capBefore('if (i >= uSurfSteps');
+  const shadowCap = capBefore('if (i >= uShadowSteps');
+
+  assert.ok(sliderMax('surfSteps') <= surfCap,
+    `the panel offers ${sliderMax('surfSteps')} ray steps but the tracer stops at ${surfCap}`);
+  assert.ok(sliderMax('shadowSteps') <= shadowCap,
+    `the panel offers ${sliderMax('shadowSteps')} shadow steps but the tracer stops at ${shadowCap}`);
+
+  // And the ladder the sandbox climbs by itself must stay inside the same limits.
+  const main = await read('src/js/90-main.js');
+  const ladder = main.slice(main.indexOf('const DETAIL = ['), main.indexOf('];', main.indexOf('const DETAIL = [')));
+  for (const [, surf, shadow] of ladder.matchAll(/surfSteps: (\d+),\s*shadowSteps: (\d+)/g)) {
+    assert.ok(Number(surf) <= surfCap, `a DETAIL rung asks for ${surf} ray steps, past the tracer's ${surfCap}`);
+    assert.ok(Number(shadow) <= shadowCap, `a DETAIL rung asks for ${shadow} shadow steps, past the tracer's ${shadowCap}`);
+  }
+});
+
+test('nothing samples a grid with an implicit level of detail', async () => {
+  // texture() works out its level from derivatives, which GLSL ES leaves undefined in
+  // non-uniform control flow - and every grid sample happens inside a ray-marching
+  // loop full of break and continue. It costs gradient maths per sample as well.
+  for (const f of ['20-glsl-common.js', '21-glsl-sim.js', '22-glsl-particles.js', '23-glsl-render.js']) {
+    const src = await read(`src/js/${f}`);
+    const bare = [...src.matchAll(/[^a-zA-Z_]texture\(/g)];
+    assert.equal(bare.length, 0,
+      `${f} samples with texture(); inside a march it must be textureLod(..., 0.0)`);
+  }
+});
+
+test('the ladder only ever goes up, and every preset can reach a rung', async () => {
+  const main = await read('src/js/90-main.js');
+  const sim = await read('src/js/30-sim.js');
+  const ladder = main.slice(main.indexOf('const DETAIL = ['), main.indexOf('];', main.indexOf('const DETAIL = [')));
+  const rungs = [...ladder.matchAll(/\{ scale: ([\d.]+),[^}]*\}/g)].map((m) => Number(m[1]));
+  assert.ok(rungs.length >= 4, 'too few rungs to adapt with');
+  for (let i = 1; i < rungs.length; i++) {
+    assert.ok(rungs[i] > rungs[i - 1], `rung ${i} does not ask for more than rung ${i - 1}`);
+  }
+  assert.ok(rungs[0] <= 0.35, 'the first frame is drawn too large to be a safe opening bid');
+  const presets = sim.slice(sim.indexOf('const QUALITY = {'), sim.indexOf('};', sim.indexOf('const QUALITY = {')));
+  const ceilings = [...presets.matchAll(/detail: (\d+)/g)].map((m) => Number(m[1]));
+  assert.equal(ceilings.length, 4, 'every preset needs a detail ceiling');
+  for (const c of ceilings) assert.ok(c >= 0 && c < rungs.length, `ceiling ${c} is not a rung`);
 });

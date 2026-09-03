@@ -19,6 +19,8 @@ namespace PowderToy3D
         private readonly WebView2 _web = new WebView2 { Dock = DockStyle.Fill };
         private readonly bool _smoke;
         private readonly bool _software;
+        // Set once the drawing process has died, so the reload asks the page to stay small.
+        private bool _safe;
         private readonly string _dataDir;
         private Timer _smokeWatchdog;
 
@@ -90,12 +92,11 @@ namespace PowderToy3D
                 };
                 core.ContainsFullScreenElementChanged += OnFullScreenElementChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
-                core.ProcessFailed += (o, a) => Fail(5, "Sorry - the sandbox stopped unexpectedly. Please open it again.");
+                core.ProcessFailed += OnProcessFailed;
                 // Without a graphics card the medium preset's float textures are enough to lose
                 // the drawing context before the sandbox has drawn anything, so start it small.
                 // The page reads this from its own address bar.
-                string query = _software ? "?quality=low" : "";
-                core.Navigate("https://" + VirtualHost + "/" + Uri.EscapeDataString(AppFileName) + query);
+                Navigate();
                 if (_smoke)
                 {
                     // Software rendering is slow; give it room, but never hang the build.
@@ -129,6 +130,43 @@ namespace PowderToy3D
         {
             bool wanted = _web.CoreWebView2 != null && _web.CoreWebView2.ContainsFullScreenElement;
             if (wanted != _fullScreen) SetFullScreen(wanted);
+        }
+
+        /// <summary>
+        /// Point the window at the app file. Without a graphics card the middle preset's
+        /// float textures are enough to lose the drawing context before the sandbox has
+        /// drawn anything, and after a crash we come back deliberately small; the page
+        /// reads both of these from its own address bar.
+        /// </summary>
+        private void Navigate()
+        {
+            string query = _safe ? "?quality=low&safe=1" : (_software ? "?quality=low" : "");
+            _web.CoreWebView2.Navigate("https://" + VirtualHost + "/" + Uri.EscapeDataString(AppFileName) + query);
+        }
+
+        /// <summary>
+        /// The part of WebView2 that does the drawing has died - almost always because the
+        /// graphics driver was asked for more than it could finish, and Windows reset it.
+        ///
+        /// Closing the program here is the wrong answer: whatever caused it will do the
+        /// same thing next time, so the person is left with a window that never opens. So
+        /// the first failure reloads the page in safe mode, which starts on the smallest
+        /// preset and stays there. Only a second failure gives up, because by then it is
+        /// not something less detail is going to fix.
+        /// </summary>
+        private void OnProcessFailed(object sender, CoreWebView2ProcessFailedEventArgs e)
+        {
+            if (_smoke || _safe)
+            {
+                Fail(5, "Sorry - the sandbox stopped unexpectedly. Please open it again.");
+                return;
+            }
+            _safe = true;
+            MessageBox.Show(this,
+                "The graphics card had trouble with that. Starting again with less detail.",
+                "Powder Toy 3D", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            try { Navigate(); }
+            catch { Fail(5, "Sorry - the sandbox stopped unexpectedly. Please open it again."); }
         }
 
         private void SetFullScreen(bool on)
