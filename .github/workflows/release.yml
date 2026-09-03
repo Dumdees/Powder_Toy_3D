@@ -1,0 +1,54 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, e.g. v1.0.0 (the tag is created if it does not exist)'
+        required: true
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      # The full browser suite gates every push in ci.yml; here we run the fast checks and
+      # rely on the packaged smoke test below, which is a real end-to-end run on Windows.
+      - run: npm test
+      - run: npm run build
+      - name: The single-file build is up to date
+        shell: bash
+        run: |
+          if ! git diff --quiet -- "Powder Toy 3D.html"; then
+            echo "The built file is out of date. Run 'npm run build' and commit the result."
+            exit 1
+          fi
+      - name: Build the Windows program, smoke-test it and build the installer
+        shell: pwsh
+        run: node scripts/windows-package.mjs --version "${{ env.VERSION }}" --smoke-test --zip
+      - name: Release notes
+        shell: pwsh
+        run: |
+          $notes = "docs/release-notes/${{ env.VERSION }}.md"
+          if (Test-Path $notes) { Copy-Item $notes release-body.md }
+          else { Set-Content release-body.md "Download the file ending in Setup.exe below and double-click it to install. No administrator password is needed." }
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Powder Toy 3D ${{ env.VERSION }}
+          body_path: release-body.md
+          files: |
+            installer/Output/*.exe
+            Powder-Toy-3D-Windows.zip
+          generate_release_notes: true

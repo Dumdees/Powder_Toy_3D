@@ -9,7 +9,9 @@
     "test": "node --test tests/unit/*.test.js",
     "test:browser": "node --test --test-concurrency=1 tests/browser/*.test.js",
     "check": "npm test && npm run build && npm run test:browser",
-    "shots": "node scripts/shots.mjs"
+    "shots": "node scripts/shots.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "package:windows": "node scripts/windows-package.mjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

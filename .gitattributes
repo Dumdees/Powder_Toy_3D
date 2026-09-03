@@ -1,2 +1,8 @@
 * text=auto eol=lf
+*.txt text eol=crlf
+*.iss text eol=crlf
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.manifest text eol=crlf
 *.png binary
+*.ico binary

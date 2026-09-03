@@ -11,9 +11,19 @@ to install, nothing to sign up for, no network access at all.
 
 ## Getting started
 
-Download **`Powder Toy 3D.html`** from this repository and open it in Chrome, Edge,
-Firefox or Safari. You need a machine with WebGL 2 — anything from roughly the last
-ten years, including integrated graphics. If it will not start, the page says why.
+**On Windows**, open the [Releases](../../releases) page and download the file ending in
+**`Setup.exe`**. Double-click it: no administrator password is needed, and you get a Desktop
+and Start menu icon. It installs for your account only and uninstalls from the Start menu.
+
+> If Windows says *"Windows protected your PC"*, click **More info** then **Run anyway**.
+> That appears only because the installer isn't signed by a large software company.
+
+**On anything else** — or if you would rather not install anything — download
+**`Powder Toy 3D.html`** and open it in Chrome, Edge, Firefox or Safari. It is exactly the
+same app; the installer just wraps it in its own window so it behaves like a normal program.
+
+Either way you need a machine with WebGL 2 — anything from roughly the last ten years,
+including the graphics built into most laptops. If it will not start, the page says why.
 
 ## Controls
 
@@ -93,6 +103,16 @@ and inlines the result into `src/index.html`.
 | `npm test` | Unit tests for the pure logic, the material table and the bundle |
 | `npm run test:browser` | Drive the built file in headless Chromium: shaders, physics, controls |
 | `npm run check` | All of the above |
+| `npm run package:windows -- --version v1.0.0 --smoke-test` | Build the Windows program and installer (**Windows only** — needs the .NET SDK and Inno Setup 6) |
+| `npm run icon` | Regenerate `installer/icon.ico` from the app mark |
+
+The Windows build is a small .NET WinForms program (`installer/host/`) that shows the same
+single HTML file in a WebView2 window, packaged by Inno Setup (`installer/PowderToy3D.iss`).
+Both need Windows, so `.github/workflows/ci.yml` builds them on a Windows runner on every
+push and attaches the installer as a build artifact, and `release.yml` publishes a release
+when a `v*` tag is pushed. `tests/unit/installer.test.js` checks the parts that have to agree
+with each other — program name, app filename, upgrade mutex, icon format — so those breaks
+surface on Linux in a second rather than on the Windows runner in five minutes.
 
 ```
 src/index.html          page shell
@@ -108,6 +128,10 @@ src/js/50-camera.js     orbit camera
 src/js/60-input.js      mouse, touch and keyboard
 src/js/70-ui.js         the panels
 src/js/90-main.js       boot and the frame loop
+
+installer/host/         the .NET WebView2 window that makes it a Windows program
+installer/PowderToy3D.iss   the Inno Setup installer script
+scripts/windows-package.mjs builds the program, smoke-tests it, builds the installer
 ```
 
 `window.PowderToy` is exposed for the console and for the tests: the settings

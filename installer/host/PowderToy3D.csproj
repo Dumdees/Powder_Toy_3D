@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A small Windows program that shows the single-file sandbox in its own window using the
+       Microsoft Edge WebView2 component that ships with Windows 10/11. Built by the release
+       workflow on a Windows runner; see scripts/windows-package.mjs. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Powder Toy 3D</AssemblyName>
+    <RootNamespace>PowderToy3D</RootNamespace>
+    <ApplicationIcon>..\icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>Powder Toy 3D</Product>
+    <Company>Powder Toy 3D</Company>
+    <Copyright>Powder Toy 3D</Copyright>
+    <Description>A physically based 3D physics sandbox</Description>
+    <Version>$(AppVersion)</Version>
+    <AppVersion Condition="'$(AppVersion)' == ''">0.0.0</AppVersion>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+</Project>

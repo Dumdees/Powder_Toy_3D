@@ -1,0 +1,58 @@
+Powder Toy 3D
+=============
+
+Double-click "Powder Toy 3D" to start.
+
+WHAT IT IS
+
+A physics sandbox in three dimensions. Pour water, tip sand, melt ice on hot
+steel, pour lava into a lake and watch it flash to steam. All of it is worked
+out from the actual equations, and drawn with a ray tracer.
+
+It runs entirely on this computer and never uses the internet.
+
+MOUSE
+
+  Left drag     Use the current tool on whatever is under the pointer
+  Right drag    Turn the camera around the box
+  Middle drag   Slide the camera sideways
+  Wheel         Move closer or further away
+  Shift+wheel   Change the brush size
+  Ctrl+wheel    Push the brush deeper into the scene, or pull it back
+
+KEYS
+
+  1-9, 0        Pick a material
+  Q W E R T     Draw, Erase, Drag, Push, Heat
+  Space         Pause or resume
+  .             Advance a single frame
+  [ ]           Brush smaller or larger
+  Backspace     Empty the box
+  Tab           Show or hide the settings
+  H             Show the controls
+  F11           Full screen
+
+Hold Shift with Push to suck material in instead of blowing it out, and with
+Heat to chill instead of warm.
+
+IF IT RUNS SLOWLY
+
+Open the settings (Tab), go to Quality, and choose the Low preset. The render
+resolution slider below it is the other dial that matters. The sandbox also
+lowers its own resolution automatically if it drops below 24 frames a second.
+
+IF IT WILL NOT START AT ALL
+
+It needs a graphics card that can do WebGL 2 - almost anything from the last
+ten years, including the graphics built into most laptops. If the window says
+it cannot start, your graphics driver may be out of date or blocked by your
+organisation. Try Windows Update first.
+
+Failing that, there is a Start menu shortcut called "Powder Toy 3D (without
+the graphics card)". That one always works, but it is many times slower - use
+the Low quality preset with it.
+
+REMOVING IT
+
+Start menu -> Powder Toy 3D -> Remove Powder Toy 3D. Nothing is left behind;
+the sandbox saves no documents.
