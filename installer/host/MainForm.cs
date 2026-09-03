@@ -91,6 +91,12 @@ namespace PowderToy3D
                     }
                 };
                 core.ContainsFullScreenElementChanged += OnFullScreenElementChanged;
+                // The page reports what it is doing through its title, and setting up the
+                // graphics is the slow, risky part - a large ray-marching shader handed to
+                // Direct3D's compiler. If that goes badly the page has drawn nothing, so the
+                // title bar is the only thing anyone can see, and it needs to be worth
+                // reading: "preparing the picture (21 of 29)" says where it stopped.
+                core.DocumentTitleChanged += OnDocumentTitleChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.ProcessFailed += OnProcessFailed;
                 // Without a graphics card the medium preset's float textures are enough to lose
@@ -167,6 +173,12 @@ namespace PowderToy3D
                 "Powder Toy 3D", MessageBoxButtons.OK, MessageBoxIcon.Information);
             try { Navigate(); }
             catch { Fail(5, "Sorry - the sandbox stopped unexpectedly. Please open it again."); }
+        }
+
+        private void OnDocumentTitleChanged(object sender, object e)
+        {
+            string title = _web.CoreWebView2 == null ? null : _web.CoreWebView2.DocumentTitle;
+            Text = string.IsNullOrWhiteSpace(title) ? "Powder Toy 3D" : title;
         }
 
         private void SetFullScreen(bool on)

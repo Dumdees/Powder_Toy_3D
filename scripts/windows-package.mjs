@@ -71,28 +71,39 @@ if (assemble) {
 
 if (has('--smoke-test')) {
   // 3. Prove the packaged program really starts the simulation on this Windows machine.
-  //    The host forces software rendering under --smoke-test, because a build runner has no
-  //    graphics card. That still exercises everything packaging can get wrong: the shipped
-  //    file parsing, WebView2 loading, all 28 shaders compiling and a frame being drawn.
+  //
+  //    Both ways round, and that is the point. The ordinary run reaches the GPU the way
+  //    every Windows browser does - ANGLE translating the shaders into HLSL for Direct3D's
+  //    compiler - which is where a ray marcher gets into trouble, and is the path a person
+  //    installing this actually takes. The software run covers the machine with no usable
+  //    driver, which is what the fallback shortcut is for. This test only forced software
+  //    once, and a shader that crashed every real Windows machine passed it every time.
   const exe = path.join(dist, `${APP}.exe`);
   if (!existsSync(exe)) { console.error('Program not built:', exe); process.exit(1); }
   const note = path.join(process.env.LOCALAPPDATA || os.homedir(), APP, 'Data', 'smoke-test.txt');
-  // Two attempts, because the failure this guards against is not always the program's fault.
-  // A build runner draws with a software rasteriser, and one has already refused an off-screen
-  // buffer on a build whose identical step had passed minutes earlier - so a single red run
-  // cannot tell a broken package from a rasteriser having a bad day. A second run can: a real
-  // break fails the same way twice, and both attempts are printed so nothing is swept away.
-  let r = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    rmSync(note, { force: true }); // so a stale note cannot be read as this attempt's result
-    r = spawnSync(exe, ['--smoke-test'], { stdio: 'inherit', timeout: 480000 });
-    const status = existsSync(note) ? readFileSync(note, 'utf8').trim() : '(no note written)';
-    console.log(`Smoke test attempt ${attempt} exit code:`, r.status);
-    console.log(`Smoke test attempt ${attempt} says:`, status);
-    if (r.status === 0) break;
-    if (attempt === 1) console.log('Trying once more before calling it a failure.');
-  }
-  if (r.status !== 0) process.exit(r.status || 1);
+
+  /** Run one mode, with a second attempt before calling it a failure. */
+  const smoke = (label, extra) => {
+    // Two attempts, because a build runner draws without a graphics card either way and
+    // one has already refused an off-screen buffer on a build whose identical step had
+    // passed minutes earlier. A real break fails the same way twice, and both attempts
+    // are printed so nothing is swept away.
+    let r = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      rmSync(note, { force: true }); // so a stale note cannot be read as this attempt's result
+      r = spawnSync(exe, ['--smoke-test', ...extra], { stdio: 'inherit', timeout: 480000 });
+      const status = existsSync(note) ? readFileSync(note, 'utf8').trim() : '(no note written)';
+      console.log(`[${label}] attempt ${attempt} exit code:`, r.status);
+      console.log(`[${label}] attempt ${attempt} says:`, status);
+      if (r.status === 0) return;
+      if (attempt === 1) console.log(`[${label}] trying once more before calling it a failure.`);
+    }
+    console.error(`[${label}] smoke test failed.`);
+    process.exit(r.status || 1);
+  };
+
+  smoke('the ordinary way', []);
+  smoke('without a graphics card', ['--software']);
 }
 
 if (has('--zip')) {

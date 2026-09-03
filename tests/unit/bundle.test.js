@@ -105,39 +105,43 @@ test('the committed single-file build is up to date', async () => {
 // produce. They also cost real money: a driver's shader compiler reasons about
 // the whole loop body, and the surface march appears again inside the caustics
 // pass, four times over. Keeping the two in step is the point of these.
-test('no quality slider offers more than the shader will actually do', async () => {
+test('no ray march has a step count the shader compiler can see', async () => {
+  // This is the one that matters most. On Windows every browser reaches the GPU through
+  // ANGLE, which translates this GLSL into HLSL and hands it to Direct3D's compiler -
+  // and that compiler unrolls loops whose trip count it can work out. Unrolling a
+  // 256-step march whose body holds texture fetches and another loop produces something
+  // enormous, and the surface march is called again inside the caustics pass four times
+  // over. Written with the limit in a uniform it cannot be unrolled at all.
+  //
+  // Small fixed loops are fine and worth unrolling; the rule is that anything long
+  // enough to be a march must get its length at draw time.
   const render = await read('src/js/23-glsl-render.js');
-  const ui = await read('src/js/70-ui.js');
+  const bad = [];
+  for (const m of render.matchAll(/for \((?:int|float) \w+ = 0; \w+ [<!]=? ([0-9]+)\s*;/g)) {
+    const bound = Number(m[1]);
+    if (bound > 8) {
+      const line = render.slice(0, m.index).split('\n').length;
+      bad.push(`line ${line}: a loop bounded by the constant ${bound}`);
+    }
+  }
+  assert.deepEqual(bad, [],
+    `these can be unrolled, and on a real Windows driver that is what crashes it:\n  ${bad.join('\n  ')}`);
 
-  // Pull the number out of the slider row rather than building a regex around the
-  // key, which is fiddly to escape and easy to get subtly wrong.
-  const sliderMax = (key) => {
-    const at = ui.indexOf(`slider(RENDER, '${key}',`);
-    assert.ok(at > 0, `no ${key} slider`);
-    const row = ui.slice(at, ui.indexOf('\n', at));
-    return Number(row.match(/max: (\d+)/)[1]);
-  };
-  // The loop bound is the number in the `for` that stands immediately above the line
-  // where the uniform stops it early.
-  const capBefore = (guard) => {
-    const at = render.indexOf(guard);
-    assert.ok(at > 0, `could not find ${guard}`);
-    return Number(render.slice(0, at).match(/for \(int i = 0; i < (\d+); i\+\+\) \{\s*$/m)[1]);
-  };
-  const surfCap = capBefore('if (i >= uSurfSteps');
-  const shadowCap = capBefore('if (i >= uShadowSteps');
-
-  assert.ok(sliderMax('surfSteps') <= surfCap,
-    `the panel offers ${sliderMax('surfSteps')} ray steps but the tracer stops at ${surfCap}`);
-  assert.ok(sliderMax('shadowSteps') <= shadowCap,
-    `the panel offers ${sliderMax('shadowSteps')} shadow steps but the tracer stops at ${shadowCap}`);
-
-  // And the ladder the sandbox climbs by itself must stay inside the same limits.
+  // ...and the marches really are driven by uniforms, not merely short.
+  for (const u of ['uSurfSteps', 'uShadowSteps', 'uVolSteps']) {
+    assert.ok(render.includes(`for (int i = 0; i < ${u}; i++)`),
+      `no loop takes its length from ${u}, so something is still bounded by a constant`);
+    assert.match(render, new RegExp(`uniform int[^;]*\\b${u}\\b`), `${u} is never declared`);
+  }
+  // Every one of them has to be given a value, or the loop runs zero times and the
+  // screen is black - which is far harder to work out than a shader that fails to link.
+  const renderer = await read('src/js/40-render.js');
+  for (const u of ['uSurfSteps', 'uShadowSteps', 'uVolSteps']) {
+    assert.match(renderer, new RegExp(`${u}: RENDER\\.\\w+`), `${u} is declared but never set`);
+  }
   const main = await read('src/js/90-main.js');
-  const ladder = main.slice(main.indexOf('const DETAIL = ['), main.indexOf('];', main.indexOf('const DETAIL = [')));
-  for (const [, surf, shadow] of ladder.matchAll(/surfSteps: (\d+),\s*shadowSteps: (\d+)/g)) {
-    assert.ok(Number(surf) <= surfCap, `a DETAIL rung asks for ${surf} ray steps, past the tracer's ${surfCap}`);
-    assert.ok(Number(shadow) <= shadowCap, `a DETAIL rung asks for ${shadow} shadow steps, past the tracer's ${shadowCap}`);
+  for (const k of ['surfSteps', 'volSteps', 'shadowSteps']) {
+    assert.match(main, new RegExp(`RENDER\\.${k} = d\\.${k};`), `the ladder never sets ${k}`);
   }
 });
 
@@ -167,4 +171,21 @@ test('the ladder only ever goes up, and every preset can reach a rung', async ()
   const ceilings = [...presets.matchAll(/detail: (\d+)/g)].map((m) => Number(m[1]));
   assert.equal(ceilings.length, 4, 'every preset needs a detail ceiling');
   for (const c of ceilings) assert.ok(c >= 0 && c < rungs.length, `ceiling ${c} is not a rung`);
+});
+
+test('shaders are queued and collected, not built one blocking at a time', async () => {
+  // Asking for LINK_STATUS is what makes a driver stop and finish compiling, so doing it
+  // straight after each link serialises all twenty-nine shaders onto one thread and gives
+  // the window nothing to show meanwhile. They are queued instead and collected together,
+  // which lets a driver use every thread it has and lets the page stay alive.
+  const gl = await read('src/js/10-gl.js');
+  const body = gl.slice(gl.indexOf('  program(name, fs'), gl.indexOf('finishPrograms('));
+  assert.ok(!body.includes('LINK_STATUS'),
+    'program() waits for the link, which serialises every shader in the app');
+  assert.match(gl, /finishPrograms\(onProgress\)/, 'nothing collects the queued programs');
+  assert.match(gl, /KHR_parallel_shader_compile/,
+    'without this the driver cannot be asked whether a shader is done except by waiting');
+  const main = await read('src/js/90-main.js');
+  assert.match(main, /await settlePrograms\(\)/, 'the boot never waits for the queued shaders');
+  assert.match(main, /finishBuild\(\)/, 'the queued shaders are never collected');
 });

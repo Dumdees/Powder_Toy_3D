@@ -18,7 +18,14 @@ namespace PowderToy3D
         {
             bool smoke = Array.IndexOf(args, "--smoke-test") >= 0;
             // A smoke test on a build runner has no graphics card, so it always uses the slow path.
-            bool software = smoke || Array.IndexOf(args, "--software") >= 0;
+            // The smoke test used to force software rendering, on the reasoning that a build
+            // runner has no graphics card. That made it useless for the failure it exists to
+            // catch: on Windows the real path to the GPU is ANGLE translating the shaders to
+            // HLSL for Direct3D's compiler, and SwiftShader shares none of that. A shader
+            // that took Direct3D's compiler apart passed the smoke test every time. So the
+            // smoke test now goes the ordinary way unless it is told otherwise, and the
+            // packaging script runs it both ways.
+            bool software = Array.IndexOf(args, "--software") >= 0;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             // The installer looks for this name so it can ask the user to close the app before upgrading.

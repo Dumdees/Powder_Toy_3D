@@ -25,13 +25,13 @@ const APP = {
  * under a second and nobody notices; a weak one settles where it can actually keep up.
  */
 const DETAIL = [
-  { scale: 0.30, surfSteps: 48,  shadowSteps: 8,  photons: 64,  smoothing: 1, substeps: 1, iterations: 24 },
-  { scale: 0.40, surfSteps: 72,  shadowSteps: 14, photons: 96,  smoothing: 2, substeps: 1, iterations: 26 },
-  { scale: 0.50, surfSteps: 100, shadowSteps: 20, photons: 128, smoothing: 2, substeps: 2, iterations: 28 },
-  { scale: 0.62, surfSteps: 128, shadowSteps: 28, photons: 160, smoothing: 3, substeps: 2, iterations: 32 },
-  { scale: 0.75, surfSteps: 160, shadowSteps: 40, photons: 192, smoothing: 3, substeps: 2, iterations: 36 },
-  { scale: 0.90, surfSteps: 200, shadowSteps: 48, photons: 224, smoothing: 3, substeps: 3, iterations: 48 },
-  { scale: 1.00, surfSteps: 240, shadowSteps: 56, photons: 256, smoothing: 3, substeps: 3, iterations: 60 },
+  { scale: 0.30, surfSteps: 48,  volSteps:  32, shadowSteps: 8,  photons: 64,  smoothing: 1, substeps: 1, iterations: 24 },
+  { scale: 0.40, surfSteps: 72,  volSteps:  48, shadowSteps: 14, photons: 96,  smoothing: 2, substeps: 1, iterations: 26 },
+  { scale: 0.50, surfSteps: 100, volSteps:  64, shadowSteps: 20, photons: 128, smoothing: 2, substeps: 2, iterations: 28 },
+  { scale: 0.62, surfSteps: 128, volSteps:  80, shadowSteps: 28, photons: 160, smoothing: 3, substeps: 2, iterations: 32 },
+  { scale: 0.75, surfSteps: 160, volSteps:  96, shadowSteps: 40, photons: 192, smoothing: 3, substeps: 2, iterations: 36 },
+  { scale: 0.90, surfSteps: 200, volSteps: 112, shadowSteps: 48, photons: 224, smoothing: 3, substeps: 3, iterations: 48 },
+  { scale: 1.00, surfSteps: 240, volSteps: 128, shadowSteps: 56, photons: 256, smoothing: 3, substeps: 3, iterations: 60 },
 ];
 
 // Substeps are the exception to "cheap rungs cut everything": halving them is the
@@ -76,6 +76,7 @@ const writeBoot = (v) => { try { if (v) localStorage.setItem(BOOT_KEY, v); else 
  */
 function banner(heading, message, detail, advice) {
   const box = document.getElementById('boot');
+  box.dataset.mode = 'fatal';
   box.hidden = false;
   box.innerHTML = '';
   box.append(...[
@@ -85,6 +86,35 @@ function banner(heading, message, detail, advice) {
     advice ? el('p', { text: advice }) : null,
   ].filter(Boolean));
   document.getElementById('ui').hidden = true;
+}
+
+/**
+ * Say what is happening, on the page and in the window title.
+ *
+ * The title is not decoration. Setting up the graphics means handing a driver a large
+ * ray-marching shader and waiting, and if that goes badly the page has drawn nothing
+ * yet - so the only thing anyone can see is the title bar, which the Windows program
+ * mirrors from here. A window reading "Powder Toy 3D - preparing trace (21 of 29)" says
+ * exactly where it stopped; a black one says nothing at all.
+ */
+function progress(message, detail) {
+  document.title = detail ? `Powder Toy 3D - ${message} (${detail})` : `Powder Toy 3D - ${message}`;
+  const box = document.getElementById('boot');
+  if (box.dataset.mode === 'fatal') return;   // never talk over a real failure
+  box.dataset.mode = 'progress';
+  box.hidden = false;
+  box.innerHTML = '';
+  box.append(el('h1', { text: 'Powder Toy 3D' }),
+             el('p', { text: detail ? `${message} (${detail})...` : `${message}...` }));
+}
+
+/** Take the message away once there is something to look at. */
+function progressDone() {
+  const box = document.getElementById('boot');
+  if (box.dataset.mode === 'fatal') return;
+  box.hidden = true;
+  box.dataset.mode = '';
+  document.title = 'Powder Toy 3D \u00b7 a physics sandbox';
 }
 
 function fatal(message, detail) {
@@ -110,8 +140,12 @@ function applyUrlOptions() {
   } catch { /* a file:// URL with no query is perfectly normal */ }
 }
 
-function start() {
+/** One turn of the event loop with a repaint, so a message actually reaches the screen. */
+const nextFrame = () => new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
+
+async function start() {
   applyUrlOptions();
+  progress('Starting');
   // Did the last run get as far as drawing steadily? If the note is still there it
   // did not, so come back deliberately small rather than repeating whatever killed
   // it. Someone whose card cannot manage the middle preset would otherwise meet the
@@ -158,6 +192,7 @@ function start() {
     const before = RENDER.scale;
     RENDER.scale = d.scale;
     RENDER.surfSteps = d.surfSteps;
+    RENDER.volSteps = d.volSteps;
     RENDER.shadowSteps = d.shadowSteps;
     RENDER.photons = d.photons;
     RENDER.smoothing = d.smoothing;
@@ -173,12 +208,27 @@ function start() {
     if (ui) ui.refresh();
   }
 
-  const build = () => {
+  /**
+   * Rebuild everything. With `defer` the shaders are only queued and the caller takes
+   * on the waiting - which for the first run means a frame at a time, with the window
+   * saying what it is waiting for.
+   */
+  const build = (opts = {}) => {
     const Q = QUALITY[APP.quality];
     applyDetail(Math.min(perf.rung, Q.detail), { resize: false });
     gfx.releaseAll();
     sim = new Sim(gfx, { grid: Q.grid, particles: Q.particles });
     renderer = new Renderer(gfx, sim);
+    if (!opts.defer) finishBuild();
+  };
+
+  /** Collect the shaders the constructors queued, then all that depends on them. */
+  const finishBuild = () => {
+    // Only say anything when there is something to wait for. A rebuild after the first
+    // one usually has an empty queue, and a banner that flashes up saying "0 of 0" and
+    // then stays there is worse than silence.
+    gfx.finishPrograms(gfx.programsPending === 0 ? null : (done, total, name) =>
+      progress('Preparing the picture', `${Math.min(done + 1, total)} of ${total}${name ? ' \u2013 ' + name : ''}`));
     cam.setGrid([sim.n.nx, sim.n.ny, sim.n.nz]);
     sizeCanvas(true);
     loadScene(APP.sceneId, true);
@@ -186,7 +236,32 @@ function start() {
       ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
         + `up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
     }
+    // Whoever asked for the rebuild, there is something to look at now. Without this a
+    // rebuild from the frame loop leaves its own progress message covering the sandbox.
+    progressDone();
   };
+
+  /**
+   * Wait for the driver to finish the queued shaders without stopping the page.
+   *
+   * KHR_parallel_shader_compile is what makes this possible: it answers "is this one
+   * done yet" without the driver having to finish it first. So the window can count them
+   * off as they land, and if one is going to take a very long time - a large ray-marching
+   * shader through ANGLE and Direct3D's compiler being the candidate - the window says
+   * which one instead of going black.
+   */
+  async function settlePrograms() {
+    if (!gfx.canPollCompile) return;   // no way to ask; finishBuild() waits the old way
+    const total = gfx.programsPending;
+    // Roughly a minute at a normal frame rate. Past that, stop counting and just wait,
+    // rather than spinning for ever on a driver that answers oddly.
+    for (let guard = 0; guard < 3600; guard++) {
+      const done = gfx.compiledCount();
+      progress('Preparing the picture', `${done} of ${total}`);
+      if (done >= total) return;
+      await nextFrame();
+    }
+  }
 
   const loadScene = (id, quiet) => {
     const scene = SCENES.find((s) => s.id === id) || SCENES[0];
@@ -309,11 +384,20 @@ function start() {
   };
 
   try {
-    build();
+    // Queue every shader without waiting on any of them, then let the driver get on
+    // with it while the window shows what it is doing. Asking a driver for a large
+    // ray-marching shader is the slowest and riskiest thing that happens here, and
+    // until now it happened behind a black window with nothing to say for itself.
+    progress('Setting up the graphics');
+    await nextFrame();
+    build({ defer: true });
+    await settlePrograms();
+    finishBuild();
   } catch (err) {
     fatal('The sandbox could not set up its simulation on this graphics card.', err && err.message);
     return;
   }
+  progressDone();
   openedAtRung = perf.rung;
   document.getElementById('ui').hidden = false;
   ui = buildUI(ctx);

@@ -821,6 +821,7 @@ class Gfx {
     this.canvas = canvas;
     this.programs = new Map();
     this.owned = new Set();
+    this.pending = [];
     this.adoptContext();
   }
   /**
@@ -838,6 +839,7 @@ class Gfx {
     if (!gl.getExtension('EXT_color_buffer_float')) {
       throw new GLError('This graphics card cannot render to floating point textures (EXT_color_buffer_float).');
     }
+    this.parallelCompile = gl.getExtension('KHR_parallel_shader_compile');
     this.floatBlend = !!gl.getExtension('EXT_float_blend');
     this.floatLinear = !!gl.getExtension('OES_texture_float_linear');
     this.maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
@@ -858,6 +860,7 @@ class Gfx {
   forgetContext() {
     this.programs.clear();
     this.owned.clear();
+    this.pending = [];
   }
   compile(type, src, name) {
     const gl = this.gl;
@@ -881,6 +884,16 @@ class Gfx {
     return sh;
   }
   /** Build (and cache) a program. `vs` defaults to the full-screen triangle. */
+  /**
+   * Build a program, but do not wait for it.
+   *
+   * Asking for LINK_STATUS is what makes a driver stop and finish compiling, so doing it
+   * here - twenty-nine times in a row - serialises every shader in the app onto one
+   * thread and gives the window nothing to show meanwhile. Instead every program is
+   * queued and the answers collected later, in finishPrograms(), which lets a driver
+   * compile them across as many threads as it has, and lets the page say what it is
+   * doing while that happens.
+   */
   program(name, fs, vs = VS_FULLSCREEN) {
     if (this.programs.has(name)) return this.programs.get(name);
     const gl = this.gl;
@@ -890,21 +903,48 @@ class Gfx {
     gl.attachShader(p, v);
     gl.attachShader(p, f);
     gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      throw new GLError(`Shader "${name}" failed to link:\n${gl.getProgramInfoLog(p)}`);
-    }
-    gl.deleteShader(v);
-    gl.deleteShader(f);
-    const uniforms = new Map();
-    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
-    for (let i = 0; i < n; i++) {
-      const info = gl.getActiveUniform(p, i);
-      const base = info.name.replace(/\[0\]$/, '');
-      uniforms.set(base, { loc: gl.getUniformLocation(p, info.name), type: info.type, size: info.size });
-    }
-    const rec = { prog: p, uniforms, name };
+    const rec = { prog: p, uniforms: new Map(), name, shaders: [v, f], linked: false };
     this.programs.set(name, rec);
+    this.pending.push(rec);
     return rec;
+  }
+  /**
+   * Collect the results of everything queued by program(). `onProgress` is called with
+   * (done, total, name) so the window can show what it is waiting for - which is the
+   * difference between a black window and one that says which shader is slow.
+   */
+  finishPrograms(onProgress) {
+    const gl = this.gl;
+    const queue = this.pending;
+    this.pending = [];
+    queue.forEach((rec, i) => {
+      if (onProgress) onProgress(i, queue.length, rec.name);
+      if (!gl.getProgramParameter(rec.prog, gl.LINK_STATUS)) {
+        throw new GLError(`Shader "${rec.name}" failed to link:\n${gl.getProgramInfoLog(rec.prog)}`);
+      }
+      for (const sh of rec.shaders) gl.deleteShader(sh);
+      rec.shaders = null;
+      rec.linked = true;
+      const n = gl.getProgramParameter(rec.prog, gl.ACTIVE_UNIFORMS);
+      for (let i2 = 0; i2 < n; i2++) {
+        const info = gl.getActiveUniform(rec.prog, i2);
+        const base = info.name.replace(/\[0\]$/, '');
+        rec.uniforms.set(base, { loc: gl.getUniformLocation(rec.prog, info.name), type: info.type, size: info.size });
+      }
+    });
+    if (onProgress) onProgress(queue.length, queue.length, '');
+    return queue.length;
+  }
+  /** True once nothing is waiting to be linked. */
+  get programsReady() { return this.pending.length === 0; }
+  get programsPending() { return this.pending.length; }
+  /** Whether the driver can be asked if a program is done without stopping to wait. */
+  get canPollCompile() { return !!this.parallelCompile; }
+  /** How many queued programs the driver says it has finished. Cheap; never blocks. */
+  compiledCount() {
+    const gl = this.gl, ext = this.parallelCompile;
+    if (!ext) return 0;
+    return this.pending.reduce((n, r) => n + (gl.getProgramParameter(r.prog, ext.COMPLETION_STATUS_KHR) ? 1 : 0), 0);
   }
   setUniforms(rec, values) {
     const gl = this.gl;
@@ -1997,7 +2037,7 @@ uniform vec2 uCTiles, uCAtlas;
 uniform float uCoarseScale;
 uniform float uIso, uDx, uClarity, uShadowSigma, uGasSigma, uGlowGain, uFloorY;
 uniform int uDoShadows, uDoReflect, uDoRefract, uDoCaustics, uDoGas;
-uniform int uSurfSteps, uShadowSteps;
+uniform int uSurfSteps, uShadowSteps, uVolSteps;
 uniform float uSurfStep;
 uniform uint uFrameSeed;
 
@@ -2076,14 +2116,16 @@ Hit marchSurface(vec3 ro, vec3 rd, float t0, float t1) {
   h.hit = false;
   h.t = t1;
   float t = t0;
-  // 256 is the ceiling the compiler has to plan for, and it is chosen to be just
-  // past the worst case: the long diagonal of the largest grid is 80*sqrt(3) = 139
-  // cells, or 252 steps at the shortest step length the panel offers. A far larger
-  // bound buys nothing and costs a great deal - a driver's shader compiler reasons
-  // about the whole loop body, and this one is called again inside the caustics
-  // pass, four times over.
-  for (int i = 0; i < 256; i++) {
-    if (i >= uSurfSteps || t >= t1) break;
+  // The bound is a uniform, deliberately, and this is the important part of the whole
+  // shader. Written the obvious way - a constant limit with a break inside - the trip
+  // count is visible to the compiler, and on Windows every browser drives the GPU
+  // through ANGLE, which turns this into HLSL and hands it to Direct3D's compiler.
+  // That compiler unrolls what it can see, and unrolling a 256-step march whose body
+  // holds texture fetches and another loop produces something enormous; it is called
+  // again inside the caustics pass, four times over. With the limit only known at draw
+  // time it cannot be unrolled, and has to stay the small loop it was written as.
+  for (int i = 0; i < uSurfSteps; i++) {
+    if (t >= t1) break;
     vec3 p = ro + rd * t;
     if (coarseMax(p) < uIso) { t += blockExit(p, rd); continue; }
     float nt = min(t + uSurfStep, t1);
@@ -2119,8 +2161,8 @@ vec3 sunVisibility(vec3 p) {
   if (t1 <= t) return vec3(1.0);
   vec3 trans = vec3(1.0);
   float dt = 0.85;
-  for (int i = 0; i < 128; i++) {
-    if (i >= uShadowSteps || t >= t1) break;
+  for (int i = 0; i < uShadowSteps; i++) {
+    if (t >= t1) break;
     vec3 q = p + rd * t;
     if (coarseMax(q) < uIso * 0.4) { t += blockExit(q, rd); continue; }
     vec4 D = sampleGrid(uFD, q);
@@ -2262,7 +2304,7 @@ vec3 traceRefraction(vec3 p, vec3 n, vec3 rd, Surf s) {
     float far = boxRange(pos, dir, boxLo(), boxHi()).y;
     float d = 0.0;
     bool left = false;
-    for (int i = 0; i < 96; i++) {
+    for (int i = 0; i < uVolSteps; i++) {
       if (d >= far) break;
       d += 0.75;
       if (fillAt(pos + dir * d) < uIso) { left = true; break; }
@@ -2299,7 +2341,7 @@ vec4 gatherGas(vec3 ro, vec3 rd, float t0, float t1) {
   // fixed lattice draws the lattice; dithering turns that into noise, which the
   // temporal accumulation then averages away.
   t += dt * hash1(uint(gl_FragCoord.x) * 73856093u + uint(gl_FragCoord.y) * 19349663u + uFrameSeed);
-  for (int i = 0; i < 96; i++) {
+  for (int i = 0; i < uVolSteps; i++) {
     if (t >= t1 || trans < 0.01) break;
     vec3 q = ro + rd * t;
     if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
@@ -2352,7 +2394,7 @@ vec3 inspect(vec3 ro, vec3 rd, float t0, float t1, bool hit, float tHit, vec3 p,
   // Volume readouts: take the largest value seen along the ray.
   float best = 0.0;
   float t = t0;
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < uVolSteps; i++) {
     if (t >= min(t1, hit ? tHit + 1.0 : t1)) break;
     vec3 q = ro + rd * t;
     if (coarseMax(q) < 0.02) { t += blockExit(q, rd); continue; }
@@ -2472,7 +2514,7 @@ void main() {
     // Cross the medium and refract out again.
     float d = 0.0;
     bool left = false;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < uVolSteps; i++) {
       if (d > length(uGrid)) break;
       d += 0.8;
       if (fillAt(p + dir * d) < uIso) { left = true; break; }
@@ -3040,6 +3082,7 @@ const RENDER = {
   accumulate: true,
   surfSteps: 160,
   shadowSteps: 40,
+  volSteps: 96,         // refraction, smoke and the inspection views
   surfStep: 0.55,
   clarity: 3.0,         // multiplier on Beer-Lambert absorption
   shadowSigma: 2.6,
@@ -3183,6 +3226,7 @@ class Renderer {
       uDoGas: RENDER.gas ? 1 : 0,
       uSurfSteps: RENDER.surfSteps,
       uShadowSteps: RENDER.shadowSteps,
+      uVolSteps: RENDER.volSteps,
       uSurfStep: RENDER.surfStep,
       uSunDir: sun,
       uSunColour: [
@@ -3725,13 +3769,13 @@ const APP = {
  * under a second and nobody notices; a weak one settles where it can actually keep up.
  */
 const DETAIL = [
-  { scale: 0.30, surfSteps: 48,  shadowSteps: 8,  photons: 64,  smoothing: 1, substeps: 1, iterations: 24 },
-  { scale: 0.40, surfSteps: 72,  shadowSteps: 14, photons: 96,  smoothing: 2, substeps: 1, iterations: 26 },
-  { scale: 0.50, surfSteps: 100, shadowSteps: 20, photons: 128, smoothing: 2, substeps: 2, iterations: 28 },
-  { scale: 0.62, surfSteps: 128, shadowSteps: 28, photons: 160, smoothing: 3, substeps: 2, iterations: 32 },
-  { scale: 0.75, surfSteps: 160, shadowSteps: 40, photons: 192, smoothing: 3, substeps: 2, iterations: 36 },
-  { scale: 0.90, surfSteps: 200, shadowSteps: 48, photons: 224, smoothing: 3, substeps: 3, iterations: 48 },
-  { scale: 1.00, surfSteps: 240, shadowSteps: 56, photons: 256, smoothing: 3, substeps: 3, iterations: 60 },
+  { scale: 0.30, surfSteps: 48,  volSteps:  32, shadowSteps: 8,  photons: 64,  smoothing: 1, substeps: 1, iterations: 24 },
+  { scale: 0.40, surfSteps: 72,  volSteps:  48, shadowSteps: 14, photons: 96,  smoothing: 2, substeps: 1, iterations: 26 },
+  { scale: 0.50, surfSteps: 100, volSteps:  64, shadowSteps: 20, photons: 128, smoothing: 2, substeps: 2, iterations: 28 },
+  { scale: 0.62, surfSteps: 128, volSteps:  80, shadowSteps: 28, photons: 160, smoothing: 3, substeps: 2, iterations: 32 },
+  { scale: 0.75, surfSteps: 160, volSteps:  96, shadowSteps: 40, photons: 192, smoothing: 3, substeps: 2, iterations: 36 },
+  { scale: 0.90, surfSteps: 200, volSteps: 112, shadowSteps: 48, photons: 224, smoothing: 3, substeps: 3, iterations: 48 },
+  { scale: 1.00, surfSteps: 240, volSteps: 128, shadowSteps: 56, photons: 256, smoothing: 3, substeps: 3, iterations: 60 },
 ];
 const PACE = { fast: 26, slow: 90, stall: 400, desperate: 700 };
 /**
@@ -3755,6 +3799,7 @@ const writeBoot = (v) => { try { if (v) localStorage.setItem(BOOT_KEY, v); else 
  */
 function banner(heading, message, detail, advice) {
   const box = document.getElementById('boot');
+  box.dataset.mode = 'fatal';
   box.hidden = false;
   box.innerHTML = '';
   box.append(...[
@@ -3764,6 +3809,33 @@ function banner(heading, message, detail, advice) {
     advice ? el('p', { text: advice }) : null,
   ].filter(Boolean));
   document.getElementById('ui').hidden = true;
+}
+/**
+ * Say what is happening, on the page and in the window title.
+ *
+ * The title is not decoration. Setting up the graphics means handing a driver a large
+ * ray-marching shader and waiting, and if that goes badly the page has drawn nothing
+ * yet - so the only thing anyone can see is the title bar, which the Windows program
+ * mirrors from here. A window reading "Powder Toy 3D - preparing trace (21 of 29)" says
+ * exactly where it stopped; a black one says nothing at all.
+ */
+function progress(message, detail) {
+  document.title = detail ? `Powder Toy 3D - ${message} (${detail})` : `Powder Toy 3D - ${message}`;
+  const box = document.getElementById('boot');
+  if (box.dataset.mode === 'fatal') return;   // never talk over a real failure
+  box.dataset.mode = 'progress';
+  box.hidden = false;
+  box.innerHTML = '';
+  box.append(el('h1', { text: 'Powder Toy 3D' }),
+             el('p', { text: detail ? `${message} (${detail})...` : `${message}...` }));
+}
+/** Take the message away once there is something to look at. */
+function progressDone() {
+  const box = document.getElementById('boot');
+  if (box.dataset.mode === 'fatal') return;
+  box.hidden = true;
+  box.dataset.mode = '';
+  document.title = 'Powder Toy 3D \u00b7 a physics sandbox';
 }
 function fatal(message, detail) {
   banner('Powder Toy 3D cannot start', message, detail,
@@ -3786,8 +3858,11 @@ function applyUrlOptions() {
     if (params.get('safe') === '1') APP.safe = true;
   } catch { /* a file:// URL with no query is perfectly normal */ }
 }
-function start() {
+/** One turn of the event loop with a repaint, so a message actually reaches the screen. */
+const nextFrame = () => new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
+async function start() {
   applyUrlOptions();
+  progress('Starting');
   if (readBoot()) APP.safe = true;
   if (APP.safe) APP.quality = 'low';
   writeBoot('starting');
@@ -3825,6 +3900,7 @@ function start() {
     const before = RENDER.scale;
     RENDER.scale = d.scale;
     RENDER.surfSteps = d.surfSteps;
+    RENDER.volSteps = d.volSteps;
     RENDER.shadowSteps = d.shadowSteps;
     RENDER.photons = d.photons;
     RENDER.smoothing = d.smoothing;
@@ -3839,12 +3915,23 @@ function start() {
     perf.slow = 0;
     if (ui) ui.refresh();
   }
-  const build = () => {
+  /**
+   * Rebuild everything. With `defer` the shaders are only queued and the caller takes
+   * on the waiting - which for the first run means a frame at a time, with the window
+   * saying what it is waiting for.
+   */
+  const build = (opts = {}) => {
     const Q = QUALITY[APP.quality];
     applyDetail(Math.min(perf.rung, Q.detail), { resize: false });
     gfx.releaseAll();
     sim = new Sim(gfx, { grid: Q.grid, particles: Q.particles });
     renderer = new Renderer(gfx, sim);
+    if (!opts.defer) finishBuild();
+  };
+  /** Collect the shaders the constructors queued, then all that depends on them. */
+  const finishBuild = () => {
+    gfx.finishPrograms(gfx.programsPending === 0 ? null : (done, total, name) =>
+      progress('Preparing the picture', `${Math.min(done + 1, total)} of ${total}${name ? ' \u2013 ' + name : ''}`));
     cam.setGrid([sim.n.nx, sim.n.ny, sim.n.nz]);
     sizeCanvas(true);
     loadScene(APP.sceneId, true);
@@ -3852,7 +3939,27 @@ function start() {
       ui.setInfo(`${sim.n.nx}×${sim.n.ny}×${sim.n.nz} cells at ${(sim.dx * 100).toFixed(1)} cm · `
         + `up to ${(sim.capacity / 1000).toFixed(0)}k particles · ${gfx.renderer}`);
     }
+    progressDone();
   };
+  /**
+   * Wait for the driver to finish the queued shaders without stopping the page.
+   *
+   * KHR_parallel_shader_compile is what makes this possible: it answers "is this one
+   * done yet" without the driver having to finish it first. So the window can count them
+   * off as they land, and if one is going to take a very long time - a large ray-marching
+   * shader through ANGLE and Direct3D's compiler being the candidate - the window says
+   * which one instead of going black.
+   */
+  async function settlePrograms() {
+    if (!gfx.canPollCompile) return;   // no way to ask; finishBuild() waits the old way
+    const total = gfx.programsPending;
+    for (let guard = 0; guard < 3600; guard++) {
+      const done = gfx.compiledCount();
+      progress('Preparing the picture', `${done} of ${total}`);
+      if (done >= total) return;
+      await nextFrame();
+    }
+  }
   const loadScene = (id, quiet) => {
     const scene = SCENES.find((s) => s.id === id) || SCENES[0];
     APP.sceneId = scene.id;
@@ -3961,11 +4068,16 @@ function start() {
     brushDown() { renderer.reset(); },
   };
   try {
-    build();
+    progress('Setting up the graphics');
+    await nextFrame();
+    build({ defer: true });
+    await settlePrograms();
+    finishBuild();
   } catch (err) {
     fatal('The sandbox could not set up its simulation on this graphics card.', err && err.message);
     return;
   }
+  progressDone();
   openedAtRung = perf.rung;
   document.getElementById('ui').hidden = false;
   ui = buildUI(ctx);

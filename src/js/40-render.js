@@ -16,6 +16,7 @@ const RENDER = {
   accumulate: true,
   surfSteps: 160,
   shadowSteps: 40,
+  volSteps: 96,         // refraction, smoke and the inspection views
   surfStep: 0.55,
   clarity: 3.0,         // multiplier on Beer-Lambert absorption
   shadowSigma: 2.6,
@@ -170,6 +171,7 @@ class Renderer {
       uDoGas: RENDER.gas ? 1 : 0,
       uSurfSteps: RENDER.surfSteps,
       uShadowSteps: RENDER.shadowSteps,
+      uVolSteps: RENDER.volSteps,
       uSurfStep: RENDER.surfStep,
       uSunDir: sun,
       uSunColour: [

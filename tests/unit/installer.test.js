@@ -160,6 +160,36 @@ test('a crash reopens the sandbox smaller instead of closing the window', async 
     'a restored context needs its extensions asked for again, or float targets stop working');
 });
 
+test('the smoke test goes the way a real machine does, not only the software way', async () => {
+  // This is the hole a crash walked through. The smoke test used to force software
+  // rendering on the reasoning that a build runner has no graphics card - so it never
+  // touched the path every Windows machine actually takes, which is ANGLE translating
+  // the shaders into HLSL for Direct3D's compiler. A shader that took that compiler
+  // apart passed the smoke test on every build.
+  const program = await read('installer/host/Program.cs');
+  assert.ok(!/bool software = smoke \|\|/.test(program),
+    'the smoke test forces software rendering again, which is what hid the crash');
+  assert.match(program, /bool software = Array\.IndexOf\(args, "--software"\) >= 0;/,
+    'software rendering must be asked for, not implied');
+  const script = await read('scripts/windows-package.mjs');
+  assert.match(script, /smoke\('the ordinary way', \[\]\)/, 'nothing tests the ordinary path');
+  assert.match(script, /smoke\('without a graphics card', \['--software'\]\)/,
+    'the no-graphics-card fallback is shipped, so it has to be tested too');
+});
+
+test('a startup that stalls says so where it can still be seen', async () => {
+  // If setting up the graphics goes badly the page has drawn nothing at all, so the
+  // window title is the only thing left. The page writes its progress there and the
+  // host copies it to the title bar; without both halves a stall is a black rectangle.
+  const main = await read('src/js/90-main.js');
+  assert.match(main, /document\.title = /, 'the page never reports progress anywhere visible');
+  assert.match(main, /progress\('Setting up the graphics'\)/, 'the slow step is not announced');
+  assert.match(main, /Preparing the picture/, 'shader building is not announced');
+  assert.match(mainForm, /DocumentTitleChanged \+= OnDocumentTitleChanged/,
+    'the window does not copy the page title, so nothing reaches the title bar');
+  assert.match(mainForm, /Text = string\.IsNullOrWhiteSpace\(title\)/, 'the title is never applied');
+});
+
 test('the host only subscribes to events that exist on CoreWebView2', () => {
   // A spelling check against the .NET surface. Anything not on this list is either a typo
   // or lives on another class; either way it costs a five-minute Windows build to find out.

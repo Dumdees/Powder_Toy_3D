@@ -20,6 +20,7 @@ class Gfx {
     this.canvas = canvas;
     this.programs = new Map();
     this.owned = new Set();
+    this.pending = [];
     this.adoptContext();
   }
 
@@ -38,6 +39,8 @@ class Gfx {
     if (!gl.getExtension('EXT_color_buffer_float')) {
       throw new GLError('This graphics card cannot render to floating point textures (EXT_color_buffer_float).');
     }
+    // Lets a program be asked whether it has finished without stopping to wait for it.
+    this.parallelCompile = gl.getExtension('KHR_parallel_shader_compile');
     this.floatBlend = !!gl.getExtension('EXT_float_blend');
     this.floatLinear = !!gl.getExtension('OES_texture_float_linear');
     this.maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
@@ -60,6 +63,7 @@ class Gfx {
   forgetContext() {
     this.programs.clear();
     this.owned.clear();
+    this.pending = [];
   }
 
   compile(type, src, name) {
@@ -85,6 +89,16 @@ class Gfx {
   }
 
   /** Build (and cache) a program. `vs` defaults to the full-screen triangle. */
+  /**
+   * Build a program, but do not wait for it.
+   *
+   * Asking for LINK_STATUS is what makes a driver stop and finish compiling, so doing it
+   * here - twenty-nine times in a row - serialises every shader in the app onto one
+   * thread and gives the window nothing to show meanwhile. Instead every program is
+   * queued and the answers collected later, in finishPrograms(), which lets a driver
+   * compile them across as many threads as it has, and lets the page say what it is
+   * doing while that happens.
+   */
   program(name, fs, vs = VS_FULLSCREEN) {
     if (this.programs.has(name)) return this.programs.get(name);
     const gl = this.gl;
@@ -94,22 +108,51 @@ class Gfx {
     gl.attachShader(p, v);
     gl.attachShader(p, f);
     gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      throw new GLError(`Shader "${name}" failed to link:\n${gl.getProgramInfoLog(p)}`);
-    }
-    gl.deleteShader(v);
-    gl.deleteShader(f);
-    // Remember every uniform's location and type so setUniforms can dispatch.
-    const uniforms = new Map();
-    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
-    for (let i = 0; i < n; i++) {
-      const info = gl.getActiveUniform(p, i);
-      const base = info.name.replace(/\[0\]$/, '');
-      uniforms.set(base, { loc: gl.getUniformLocation(p, info.name), type: info.type, size: info.size });
-    }
-    const rec = { prog: p, uniforms, name };
+    const rec = { prog: p, uniforms: new Map(), name, shaders: [v, f], linked: false };
     this.programs.set(name, rec);
+    this.pending.push(rec);
     return rec;
+  }
+
+  /**
+   * Collect the results of everything queued by program(). `onProgress` is called with
+   * (done, total, name) so the window can show what it is waiting for - which is the
+   * difference between a black window and one that says which shader is slow.
+   */
+  finishPrograms(onProgress) {
+    const gl = this.gl;
+    const queue = this.pending;
+    this.pending = [];
+    queue.forEach((rec, i) => {
+      if (onProgress) onProgress(i, queue.length, rec.name);
+      if (!gl.getProgramParameter(rec.prog, gl.LINK_STATUS)) {
+        throw new GLError(`Shader "${rec.name}" failed to link:\n${gl.getProgramInfoLog(rec.prog)}`);
+      }
+      for (const sh of rec.shaders) gl.deleteShader(sh);
+      rec.shaders = null;
+      rec.linked = true;
+      // Remember every uniform's location and type so setUniforms can dispatch.
+      const n = gl.getProgramParameter(rec.prog, gl.ACTIVE_UNIFORMS);
+      for (let i2 = 0; i2 < n; i2++) {
+        const info = gl.getActiveUniform(rec.prog, i2);
+        const base = info.name.replace(/\[0\]$/, '');
+        rec.uniforms.set(base, { loc: gl.getUniformLocation(rec.prog, info.name), type: info.type, size: info.size });
+      }
+    });
+    if (onProgress) onProgress(queue.length, queue.length, '');
+    return queue.length;
+  }
+
+  /** True once nothing is waiting to be linked. */
+  get programsReady() { return this.pending.length === 0; }
+  get programsPending() { return this.pending.length; }
+  /** Whether the driver can be asked if a program is done without stopping to wait. */
+  get canPollCompile() { return !!this.parallelCompile; }
+  /** How many queued programs the driver says it has finished. Cheap; never blocks. */
+  compiledCount() {
+    const gl = this.gl, ext = this.parallelCompile;
+    if (!ext) return 0;
+    return this.pending.reduce((n, r) => n + (gl.getProgramParameter(r.prog, ext.COMPLETION_STATUS_KHR) ? 1 : 0), 0);
   }
 
   setUniforms(rec, values) {
