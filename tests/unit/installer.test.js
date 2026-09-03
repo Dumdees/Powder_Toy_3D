@@ -77,6 +77,55 @@ test('the page and the window agree on how full screen is asked for', async () =
     + 'expose - it compiles nowhere, and only fails once the Windows runner gets to it');
 });
 
+/**
+ * Strip comments and string literals, so brace counting is not thrown off by the
+ * JavaScript held inside the host's verbatim strings.
+ */
+function stripCsLiterals(cs) {
+  return cs
+    .replace(/@"(?:[^"]|"")*"/g, '""')   // verbatim strings, which may span lines
+    .replace(/"(?:\\.|[^"\\])*"/g, '""') // ordinary strings
+    .replace(/\/\/.*$/gm, '');           // line comments
+}
+
+/**
+ * Find a local declared while another of the same name is still in scope. C# rejects
+ * this, but two sibling blocks may each declare the same name, so scopes are tracked
+ * with a stack rather than a flat set.
+ */
+function shadowedLocals(cs) {
+  const found = [];
+  const scopes = [new Map()];
+  stripCsLiterals(cs).split('\n').forEach((line, i) => {
+    const decl = line.match(/^\s+(?:var|string|bool|int|uint|long|float|double)\s+(\w+)\s*=/);
+    if (decl) {
+      const name = decl[1];
+      for (const scope of scopes) {
+        if (scope.has(name)) found.push(`'${name}' on line ${i + 1} is already in scope from line ${scope.get(name)}`);
+      }
+      scopes[scopes.length - 1].set(name, i + 1);
+    }
+    for (const ch of line.replace(/'.'/g, '')) {
+      if (ch === '{') scopes.push(new Map());
+      else if (ch === '}' && scopes.length > 1) scopes.pop();
+    }
+  });
+  return found;
+}
+
+test('no local in the host hides another one - the C# compiler is five minutes away', () => {
+  // There is no .NET SDK on the machine that writes this code, so a name clash would
+  // otherwise be found by a Windows runner rather than by anything here.
+  const clashes = shadowedLocals(mainForm);
+  assert.deepEqual(clashes, [], `the host would not compile:\n  ${clashes.join('\n  ')}`);
+  // ...and prove the check has teeth, on a snippet with a known clash.
+  const broken = 'void M()\n{\n  var options = 1;\n  string options = "x";\n}\n';
+  assert.equal(shadowedLocals(broken).length, 1, 'the shadowing check does not actually detect shadowing');
+  // Two sibling loops may each use the same name; that is legal and must not be flagged.
+  const fine = 'void M()\n{\n  for (int i = 0; ; ) { var t = 1; }\n  for (int j = 0; ; ) { var t = 2; }\n}\n';
+  assert.deepEqual(shadowedLocals(fine), [], 'sibling scopes were wrongly reported as a clash');
+});
+
 test('the window can ask the page to start small, and the page listens', async () => {
   // On a machine with no graphics card the medium preset allocates enough float
   // texture to lose the drawing context before anything can be turned down, so the

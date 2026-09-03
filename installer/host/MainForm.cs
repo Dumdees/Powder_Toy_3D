@@ -94,8 +94,8 @@ namespace PowderToy3D
                 // Without a graphics card the medium preset's float textures are enough to lose
                 // the drawing context before the sandbox has drawn anything, so start it small.
                 // The page reads this from its own address bar.
-                string options = _software ? "?quality=low" : "";
-                core.Navigate("https://" + VirtualHost + "/" + Uri.EscapeDataString(AppFileName) + options);
+                string query = _software ? "?quality=low" : "";
+                core.Navigate("https://" + VirtualHost + "/" + Uri.EscapeDataString(AppFileName) + query);
                 if (_smoke)
                 {
                     // Software rendering is slow; give it room, but never hang the build.
