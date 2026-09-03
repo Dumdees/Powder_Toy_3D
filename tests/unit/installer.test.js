@@ -172,8 +172,10 @@ test('the smoke test goes the way a real machine does, not only the software way
   assert.match(program, /bool software = Array\.IndexOf\(args, "--software"\) >= 0;/,
     'software rendering must be asked for, not implied');
   const script = await read('scripts/windows-package.mjs');
-  assert.match(script, /smoke\('the ordinary way', \[\]\)/, 'nothing tests the ordinary path');
-  assert.match(script, /smoke\('without a graphics card', \['--software'\]\)/,
+  assert.match(script, /smoke\('the ordinary way', \[\], true\)/, 'nothing tests the ordinary path');
+  assert.match(script, /fell back to software rendering/,
+    'nothing checks that the ordinary run really used the ordinary path');
+  assert.match(script, /smoke\('without a graphics card', \['--software'\], false\)/,
     'the no-graphics-card fallback is shipped, so it has to be tested too');
 });
 

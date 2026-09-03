@@ -83,7 +83,7 @@ if (has('--smoke-test')) {
   const note = path.join(process.env.LOCALAPPDATA || os.homedir(), APP, 'Data', 'smoke-test.txt');
 
   /** Run one mode, with a second attempt before calling it a failure. */
-  const smoke = (label, extra) => {
+  const smoke = (label, extra, wantHardware) => {
     // Two attempts, because a build runner draws without a graphics card either way and
     // one has already refused an off-screen buffer on a build whose identical step had
     // passed minutes earlier. A real break fails the same way twice, and both attempts
@@ -95,15 +95,27 @@ if (has('--smoke-test')) {
       const status = existsSync(note) ? readFileSync(note, 'utf8').trim() : '(no note written)';
       console.log(`[${label}] attempt ${attempt} exit code:`, r.status);
       console.log(`[${label}] attempt ${attempt} says:`, status);
-      if (r.status === 0) return;
+      if (r.status === 0) {
+        // Guard the point of the exercise. If the ordinary run quietly fell back to the
+        // software rasteriser, it did not touch ANGLE's translation or Direct3D's shader
+        // compiler, and a green tick here would mean nothing at all - which is exactly
+        // how a shader that crashed every real Windows machine passed every build.
+        const gpu = (status.match(/gpu=(.*)$/) || [])[1] || '(not reported)';
+        console.log(`[${label}] drew with: ${gpu}`);
+        if (wantHardware && /swiftshader|software/i.test(gpu)) {
+          console.error(`[${label}] fell back to software rendering, so this run tested nothing.`);
+          process.exit(1);
+        }
+        return;
+      }
       if (attempt === 1) console.log(`[${label}] trying once more before calling it a failure.`);
     }
     console.error(`[${label}] smoke test failed.`);
     process.exit(r.status || 1);
   };
 
-  smoke('the ordinary way', []);
-  smoke('without a graphics card', ['--software']);
+  smoke('the ordinary way', [], true);
+  smoke('without a graphics card', ['--software'], false);
 }
 
 if (has('--zip')) {
