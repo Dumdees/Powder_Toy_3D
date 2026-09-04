@@ -57,13 +57,31 @@ const QUALITY = {
   medium:   { grid: 64,  particles: 1 << 17, detail: 4 },
   high:     { grid: 64,  particles: 1 << 18, detail: 5 },
   ultra:    { grid: 80,  particles: 1 << 18, detail: 6 },
-  // Room rather than resolution. A preset counts cells, not metres - the sandbox is the
-  // same size across whichever is chosen, so these buy detail within it, and boxMetres
-  // decides how much world that detail is spread over. Work grows with the cube of the
-  // side, so 96 cells is about three and a half times the middle preset, 128 about eight.
   huge:     { grid: 96,  particles: 1 << 18, detail: 6 },
   enormous: { grid: 128, particles: 1 << 19, detail: 6 },
 };
+
+/**
+ * The two numbers that actually decide how much sandbox there is.
+ *
+ * `cells` is the room: the solver is a lattice, so space is measured in cells and
+ * nothing else adds any. Making the box wider in metres only stretches the same cells
+ * over more ground - it changes the scale of what is simulated, not how much of it
+ * there is, which is a different thing and easy to reach for by mistake.
+ *
+ * `specks` is how much material can exist at once. A preset sets both; these are what
+ * the sliders move, and either one changes means everything is rebuilt, because the
+ * textures holding them are a fixed size.
+ */
+const WORLD = { cells: 64, specks: 1 << 17 };
+
+// Twelve RGBA32F textures follow every speck around - position, velocity and state, each
+// double-buffered, plus the affine field - so a speck costs 192 bytes of graphics memory.
+// There is no unlimited setting to offer: the pool is a texture, textures have a size, and
+// a card has only so much room. This is as far as it goes without asking for trouble.
+const BYTES_PER_SPECK = 12 * 16;
+const MAX_SPECKS = 1 << 23;      // 8.4 million, about 1.6 GB
+const MAX_CELLS = 160;           // 4.1 million cells
 
 const COARSE_SCALE = 4;
 
@@ -429,7 +447,13 @@ class Sim {
   }
 
   /** Rebuild the fields the renderer needs, and the block map that speeds it up. */
-  buildRenderFields() {
+  /**
+   * `rounds` overrides how many times the fields are blurred. The tracer wants them
+   * smooth, because it is looking for a surface in them; the speck renderer reads the
+   * particles directly and only needs these at all so the brush can still find what is
+   * under the pointer, which one round does perfectly well.
+   */
+  buildRenderFields({ rounds = null } = {}) {
     const g = this.gfx;
     const b = this.base;
     g.clear(this.fbR[0]);
@@ -438,7 +462,7 @@ class Sim {
     }, Math.max(8, this.used * 8));
     let i = 0;
     const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-    for (let round = 0; round < Math.max(1, RENDER.smoothing); round++) {
+    for (let round = 0; round < Math.max(1, rounds == null ? RENDER.smoothing : rounds); round++) {
       for (const step of axes) {
         const src = this.rF[i];
         g.pass(this.fbR[1 - i], this.progRBlur, {

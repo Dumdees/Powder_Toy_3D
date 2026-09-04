@@ -139,7 +139,30 @@ scripts/windows-package.mjs builds the program, smoke-tests it, builds the insta
 objects (`PHYSICS`, `RENDER`, `QUALITY`, `DETAIL`), the live `sim` and `renderer`, and
 `advance(n)` / `drawOnce()` so the physics can be stepped without drawing.
 
+### Two renderers
+
+`RENDER.mode` picks between them. `rays` marches through the fields for every pixel and
+is where the shadows, refraction and caustics come from. `raster` draws each speck once
+as a sphere facing the camera over a sky and a ground plane, and lets the depth buffer
+decide what is in front - no light transport at all, and none of the tracer's
+preparation either: the caustics pass is skipped and the render fields are blurred once
+rather than three times, since in that mode they exist only so the brush can still find
+what is under the pointer.
+
+Measured at 2.3x cheaper per frame under a software rasteriser, which badly understates
+it: a CPU rasteriser makes point sprites expensive and ray marching's texture fetches
+cheap, and real hardware inverts both.
+
+`RENDER.iso` is the fill fraction that counts as a surface. Half was the obvious choice
+and the wrong one - the fields are blurred before they are traced, so a small amount of
+material never reaches half anywhere and was drawn as nothing at all.
+
 ### How big the world is, and whether it has walls
+
+`WORLD.cells` is the room and `WORLD.specks` is how much material can exist at once;
+both live in fixed-size textures, so changing either rebuilds everything. A speck costs
+192 bytes of graphics memory - twelve RGBA32F textures follow it around - which is why
+there is no unlimited setting to offer, and the panel shows the cost as you drag.
 
 `boxMetres` is the width of the whole sandbox and `dx` is read from it live, so the
 world can be resized while it runs: every length the solver uses is scaled by the cell

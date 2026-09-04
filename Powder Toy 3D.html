@@ -1012,10 +1012,21 @@ class Gfx {
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, fmt, type, data);
   }
-  framebuffer(targets) {
+  /**
+   * `depth` attaches a depth buffer, which only the raster renderer wants: the ray tracer
+   * works out what is in front by marching, so it has never needed one.
+   */
+  framebuffer(targets, { depth = false } = {}) {
     const gl = this.gl;
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    let depthBuf = null;
+    if (depth) {
+      depthBuf = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuf);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, targets[0].w, targets[0].h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthBuf);
+    }
     const bufs = [];
     targets.forEach((t, i) => {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t.tex, 0);
@@ -1028,13 +1039,14 @@ class Gfx {
       throw new GLError(`Could not set up an off-screen buffer (0x${status.toString(16)}, ${shape}).`);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const rec = { fb, w: targets[0].w, h: targets[0].h, n: targets.length };
+    const rec = { fb, w: targets[0].w, h: targets[0].h, n: targets.length, depth: depthBuf };
     this.owned.add(rec);
     return rec;
   }
   /** Delete one texture or framebuffer. */
   free(o) {
     if (!o || !this.owned.has(o)) return;
+    if (o.depth) this.gl.deleteRenderbuffer(o.depth);
     if (o.tex) this.gl.deleteTexture(o.tex); else if (o.fb) this.gl.deleteFramebuffer(o.fb);
     this.owned.delete(o);
   }
@@ -1059,6 +1071,25 @@ class Gfx {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   /** Draw `count` points, additively blended into `target`. Used for scatter passes. */
+  /**
+   * Points that occlude one another, rather than adding up. This is the raster renderer's
+   * one draw: every speck as a little sphere, nearest one winning.
+   */
+  points(target, rec, uniforms, count, { clearColour = null } = {}) {
+    const gl = this.gl;
+    this.bind(target);
+    if (clearColour) {
+      gl.clearColor(clearColour[0], clearColour[1], clearColour[2], clearColour[3]);
+      gl.clearDepth(1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.useProgram(rec.prog);
+    this.setUniforms(rec, uniforms);
+    gl.drawArrays(gl.POINTS, 0, count);
+    gl.disable(gl.DEPTH_TEST);
+  }
   scatter(target, rec, uniforms, count, { clear = false } = {}) {
     const gl = this.gl;
     this.bind(target);
@@ -2678,6 +2709,88 @@ void main() {
   oColour = vec4(toSRGB(max(c, vec3(0.0))), 1.0);
 }`;
 
+/* ---- 25-glsl-raster.js ---- */
+const RASTER_BG_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd;
+uniform vec2 uRes;
+uniform float uFloorY;
+out vec4 oColour;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes * 2.0 - 1.0;
+  vec3 rd = normalize(uCamFwd + uCamRight * uv.x + uCamUp * uv.y);
+  vec3 col;
+  float t = rd.y < -1e-4 ? (uFloorY - uCamPos.y) / rd.y : -1.0;
+  if (t > 0.0) {
+    vec3 p = uCamPos + rd * t;
+    vec2 q = p.xz / uGrid.x;
+    float line = smoothstep(0.02, 0.05, min(abs(fract(q.x * 4.0) - 0.5), abs(fract(q.y * 4.0) - 0.5)));
+    vec3 albedo = mix(vec3(0.16, 0.155, 0.15), vec3(0.24, 0.235, 0.23), line);
+    vec3 lit = albedo * (uSunColour * max(uSunDir.y, 0.0) + skyIrradiance(vec3(0.0, 1.0, 0.0))) / PI;
+    // Ground far from the box fades into the horizon rather than running on for ever.
+    float r = length(p.xz - uGrid.xz * 0.5) / uGrid.x;
+    vec3 haze = skyRadiance(normalize(vec3(rd.x, 0.03, rd.z) + vec3(1e-5)));
+    col = mix(lit, haze, smoothstep(2.5, 8.0, r));
+  } else {
+    col = skyRadiance(rd) + sunRadiance(rd);
+  }
+  oColour = vec4(col, 1.0);
+}`;
+const RASTER_VS = GLSL_HEAD + GLSL_COMMON + GLSL_PARTICLE_HEAD + `
+uniform sampler2D uPos, uVel, uAux;
+uniform mat4 uViewProj;
+uniform float uPointScale;   // pixels per cell at one cell of distance
+uniform float uSpeck;        // radius of a speck, in cells
+uniform vec3 uCamPos;
+flat out vec4 vAlbedo;       // rgb, and glow
+flat out vec2 vHeat;         // temperature, whether this is a gas
+void main() {
+  ivec2 pt = pTexel(gl_VertexID);
+  vec4 P = texelFetch(uPos, pt, 0);
+  int mid = int(P.w + 0.5);
+  if (mid == 0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vAlbedo = vec4(0.0);
+    vHeat = vec2(0.0);
+    return;
+  }
+  vec4 m1 = matRow(mid, 1);
+  vec4 m3 = matRow(mid, 3);
+  vec4 V = texelFetch(uVel, pt, 0);
+  vAlbedo = vec4(m1.rgb, m1.a);
+  vHeat = vec2(V.w, m3.z);
+  // A gas is loose and mostly empty, so it is drawn larger and fainter than a grain.
+  float radius = uSpeck * mix(1.0, 2.2, m3.z);
+  gl_Position = uViewProj * vec4(P.xyz, 1.0);
+  float dist = max(length(P.xyz - uCamPos), 0.5);
+  gl_PointSize = clamp(2.0 * radius * uPointScale / dist, 1.0, 128.0);
+}`;
+const RASTER_FS = GLSL_HEAD + GLSL_COMMON + `
+uniform vec3 uCamRight, uCamUp, uCamFwd;
+uniform float uGlowGain;
+flat in vec4 vAlbedo;
+flat in vec2 vHeat;
+out vec4 oColour;
+void main() {
+  // A sphere drawn as a flat point: throw away the corners, and read the normal off
+  // the disc so it lights like a ball rather than a sticker.
+  vec2 d = gl_PointCoord * 2.0 - 1.0;
+  d.y = -d.y;
+  float r2 = dot(d, d);
+  if (r2 > 1.0) discard;
+  vec3 right = normalize(uCamRight), up = normalize(uCamUp), fwd = normalize(uCamFwd);
+  vec3 n = normalize(right * d.x + up * d.y - fwd * sqrt(max(1.0 - r2, 0.0)));
+
+  float ndl = max(dot(n, uSunDir), 0.0);
+  vec3 lit = vAlbedo.rgb * (uSunColour * ndl + skyIrradiance(n)) / PI;
+  // Anything hot enough glows on its own, which is most of what makes fire and lava
+  // read correctly without a single ray being traced.
+  lit += blackbody(vHeat.x + T_ZERO_C) * thermalPower(vHeat.x) * vAlbedo.a * uGlowGain;
+  // Gas is thin: fade it towards its edges so a cloud of it looks soft.
+  float alpha = vHeat.y > 0.5 ? (1.0 - r2) * 0.55 : 1.0;
+  oColour = vec4(lit * alpha, alpha);
+}`;
+
 /* ---- 30-sim.js ---- */
 /** Tunables the settings panel edits directly. SI units throughout. */
 const PHYSICS = {
@@ -2730,6 +2843,22 @@ const QUALITY = {
   huge:     { grid: 96,  particles: 1 << 18, detail: 6 },
   enormous: { grid: 128, particles: 1 << 19, detail: 6 },
 };
+/**
+ * The two numbers that actually decide how much sandbox there is.
+ *
+ * `cells` is the room: the solver is a lattice, so space is measured in cells and
+ * nothing else adds any. Making the box wider in metres only stretches the same cells
+ * over more ground - it changes the scale of what is simulated, not how much of it
+ * there is, which is a different thing and easy to reach for by mistake.
+ *
+ * `specks` is how much material can exist at once. A preset sets both; these are what
+ * the sliders move, and either one changes means everything is rebuilt, because the
+ * textures holding them are a fixed size.
+ */
+const WORLD = { cells: 64, specks: 1 << 17 };
+const BYTES_PER_SPECK = 12 * 16;
+const MAX_SPECKS = 1 << 23;      // 8.4 million, about 1.6 GB
+const MAX_CELLS = 160;           // 4.1 million cells
 const COARSE_SCALE = 4;
 /** The three wall switches, as the shaders want them. */
 const wallUniforms = () => {
@@ -3050,7 +3179,13 @@ class Sim {
     this.time += dt;
   }
   /** Rebuild the fields the renderer needs, and the block map that speeds it up. */
-  buildRenderFields() {
+  /**
+   * `rounds` overrides how many times the fields are blurred. The tracer wants them
+   * smooth, because it is looking for a surface in them; the speck renderer reads the
+   * particles directly and only needs these at all so the brush can still find what is
+   * under the pointer, which one round does perfectly well.
+   */
+  buildRenderFields({ rounds = null } = {}) {
     const g = this.gfx;
     const b = this.base;
     g.clear(this.fbR[0]);
@@ -3059,7 +3194,7 @@ class Sim {
     }, Math.max(8, this.used * 8));
     let i = 0;
     const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-    for (let round = 0; round < Math.max(1, RENDER.smoothing); round++) {
+    for (let round = 0; round < Math.max(1, rounds == null ? RENDER.smoothing : rounds); round++) {
       for (const step of axes) {
         const src = this.rF[i];
         g.pass(this.fbR[1 - i], this.progRBlur, {
@@ -3126,8 +3261,11 @@ void main() {
 
 /* ---- 40-render.js ---- */
 const RENDER = {
+  mode: 'rays',
+  speckSize: 0.55,      // radius of one speck in raster mode, in cells
   scale: 0.75,          // resolution the tracer runs at, relative to the window
   smoothing: 3,         // rounds of blur over the fields before they are traced
+  iso: 0.20,
   exposure: 0.9,
   bloom: 0.45,
   vignette: 0.32,
@@ -3196,6 +3334,8 @@ class Renderer {
     this.progPhotonSplat = g.program('photonsplat', PHOTON_SPLAT_FS, PHOTON_SPLAT_VS);
     this.progCausticBlur = g.program('causticblur', CAUSTIC_BLUR_FS);
     this.progPick = g.program('pick', PICK_FS);
+    this.progRasterBg = g.program('rasterbg', RASTER_BG_FS);
+    this.progRaster = g.program('raster', RASTER_FS, RASTER_VS);
   }
   #allocVolumes() {
     const g = this.gfx;
@@ -3237,7 +3377,7 @@ class Renderer {
     this.hdr = hdr();
     this.history = [hdr(), hdr()];
     this.hi = 0;
-    this.fbHDR = g.framebuffer([this.hdr]);
+    this.fbHDR = g.framebuffer([this.hdr], { depth: true });
     this.fbHistory = this.history.map((t) => g.framebuffer([t]));
     this.sized.push(this.fbHDR, ...this.fbHistory);
     this.bloom = [];
@@ -3270,7 +3410,7 @@ class Renderer {
       uFA: f[0], uFB: f[1], uFC: f[2], uFD: f[3],
       ...sim.coarseUniforms(),
       uCaustic: RENDER.caustics ? this.caustic[this.ci] : this.zero,
-      uIso: 0.5,
+      uIso: RENDER.iso,
       uDx: sim.dx,
       uClarity: RENDER.clarity,
       uShadowSigma: RENDER.shadowSigma,
@@ -3349,16 +3489,47 @@ class Renderer {
     });
     return this.pickResult;
   }
+  /**
+   * Every speck drawn once as a sphere facing the camera, nearest winning, over a sky
+   * and a ground plane. No rays are traced, so there are no shadows, no reflections and
+   * nothing seen through water - and it costs a small fraction of the tracer.
+   */
+  drawSpecks(scene, cam, aspect) {
+    const g = this.gfx;
+    const cu = this.cameraUniforms(cam, aspect);
+    g.pass(this.fbHDR, this.progRasterBg, {
+      ...scene, ...cu, uRes: [this.width, this.height],
+    });
+    const fovY = RENDER.fov * Math.PI / 180;
+    const grid = this.sim.n.nx;
+    const view = mat4LookAt(cam.position, cam.target, [0, 1, 0]);
+    const proj = mat4Perspective(fovY, aspect, 0.1, cam.dist + grid * 6);
+    g.points(this.fbHDR, this.progRaster, {
+      ...this.sim.base,
+      uPos: this.sim.pPos[this.sim.pi], uVel: this.sim.pVel[this.sim.pi], uAux: this.sim.pAux[this.sim.pi],
+      uViewProj: mat4Mul(proj, view),
+      uPointScale: this.height / (2 * Math.tan(fovY * 0.5)),
+      uSpeck: RENDER.speckSize,
+      uCamPos: cam.position, uCamRight: cu.uCamRight, uCamUp: cu.uCamUp, uCamFwd: cu.uCamFwd,
+      uSunDir: scene.uSunDir, uSunColour: scene.uSunColour, uSkyGain: scene.uSkyGain,
+      uGlowGain: RENDER.glowGain,
+    }, Math.max(1, this.sim.used));
+  }
   draw(scene, cam, aspect, brush, settled) {
     const g = this.gfx;
-    const jitter = [halton(this.frame + 1, 2) - 0.5, halton(this.frame + 1, 3) - 0.5];
-    g.pass(this.fbHDR, this.progTrace, {
-      ...scene, ...this.cameraUniforms(cam, aspect),
-      uRes: [this.width, this.height],
-      uJitter: jitter,
-      uReflectGain: RENDER.reflectGain,
-    });
-    const blend = !RENDER.accumulate ? 1 : (settled ? Math.max(0.06, 1 / (this.frame + 1)) : 0.42);
+    const raster = RENDER.mode === 'raster';
+    if (raster) {
+      this.drawSpecks(scene, cam, aspect);
+    } else {
+      const jitter = [halton(this.frame + 1, 2) - 0.5, halton(this.frame + 1, 3) - 0.5];
+      g.pass(this.fbHDR, this.progTrace, {
+        ...scene, ...this.cameraUniforms(cam, aspect),
+        uRes: [this.width, this.height],
+        uJitter: jitter,
+        uReflectGain: RENDER.reflectGain,
+      });
+    }
+    const blend = raster || !RENDER.accumulate ? 1 : (settled ? Math.max(0.06, 1 / (this.frame + 1)) : 0.42);
     g.pass(this.fbHistory[1 - this.hi], this.progAccum, {
       uNew: this.hdr, uHistory: this.frame === 0 ? this.hdr : this.history[this.hi], uBlend: this.frame === 0 ? 1 : blend,
     });
@@ -3690,15 +3861,28 @@ function buildUI(ctx) {
       slider(PHYSICS, 'restitution', { label: 'Bounce', min: 0, max: 0.7 }),
       slider(PHYSICS, 'wallFriction', { label: 'Wall grip', min: 0.4, max: 1 }),
     ]),
-    group('The box', [
+    group('How much sandbox', [
+      slider(WORLD, 'cells', {
+        label: 'Room', min: 32, max: MAX_CELLS, step: 16,
+        fmt: (v) => `${v} cells each way`,
+        onChange: () => ctx.rebuildWorld(),
+      }),
+      slider(WORLD, 'specks', {
+        label: 'How much material', min: 1 << 12, max: MAX_SPECKS, step: 4096,
+        fmt: (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : Math.round(v / 1000) + 'k')
+          + ` \u00b7 ${Math.round(v * BYTES_PER_SPECK / 1048576)} MB`,
+        onChange: () => ctx.rebuildWorld(),
+      }),
+      el('p', { class: 'note', text: 'Room is the one that gives you more space to build in. '
+        + 'Both are rebuilt when changed, so the sandbox is emptied.' }),
       el('div', { class: 'row' }, [el('label', { text: 'Walls' }), wallSel]),
       slider(PHYSICS, 'boxMetres', {
-        label: 'How big it is', min: 0.5, max: 20, step: 0.1,
+        label: 'Scale', min: 0.5, max: 20, step: 0.1,
         fmt: (v) => (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' m across',
         onChange: () => { ctx.worldResized(); dirty(); },
       }),
-      el('p', { class: 'note', text: 'Making it bigger spreads the same cells over more ground, '
-        + 'so everything is coarser. For more room at the same detail, pick a larger preset under Quality.' }),
+      el('p', { class: 'note', text: 'Scale is how much real space those cells stand for - '
+        + 'it changes how heavy and fast everything looks, not how much room there is.' }),
     ]),
     el('p', { class: 'note', text: 'Water is held incompressible by a pressure solve; grains yield by Coulomb friction; steam and smoke rise by the Boussinesq term.' }),
   );
@@ -3734,6 +3918,12 @@ function buildUI(ctx) {
   const viewSel = el('select', { onchange: (e) => { RENDER.view = Number(e.target.value); ctx.resetAccumulation(); } },
     VIEWS.map((name, i) => el('option', { value: i, text: name })));
   const info = el('p', { class: 'note' });
+  const modeSel = el('select', { onchange: (e) => { RENDER.mode = e.target.value; ctx.resetAccumulation(); } }, [
+    el('option', { value: 'rays', text: 'Traced rays - slow, and lit properly' }),
+    el('option', { value: 'raster', text: 'Specks - fast, and flat' }),
+  ]);
+  modeSel.value = RENDER.mode;
+  syncers.push(() => { modeSel.value = RENDER.mode; });
   const byHand = () => { ctx.manualDetail(); dirty(); };
   const autoInput = el('input', { type: 'checkbox' });
   autoInput.checked = ctx.autoDetail;
@@ -3748,6 +3938,7 @@ function buildUI(ctx) {
   safeNote.hidden = !ctx.safeMode;
   $('page-quality').append(
     group('Detail', [
+      el('div', { class: 'row' }, [el('label', { text: 'Draw with' }), modeSel]),
       el('div', { class: 'row' }, [el('label', { text: 'Preset' }), presetSel]),
       el('div', { class: 'row' }, [el('label', { text: 'Show' }), viewSel]),
       autoRow,
@@ -3757,6 +3948,14 @@ function buildUI(ctx) {
       slider(RENDER, 'surfStep', { label: 'Step length', min: 0.2, max: 1.2, fmt: (v) => v.toFixed(2) + ' cells', onChange: dirty }),
       slider(RENDER, 'photons', { label: 'Caustic photons', min: 64, max: 256, step: 32, fmt: (v) => (v * v / 1000).toFixed(0) + 'k', onChange: byHand }),
       slider(RENDER, 'smoothing', { label: 'Surface smoothing', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: byHand }),
+      slider(RENDER, 'iso', {
+        label: 'How little counts as something', min: 0.05, max: 0.9, step: 0.01,
+        fmt: (v) => v.toFixed(2), onChange: dirty,
+      }),
+      slider(RENDER, 'speckSize', {
+        label: 'Speck size (drawn as specks)', min: 0.2, max: 2, step: 0.05,
+        fmt: (v) => v.toFixed(2) + ' cells', onChange: dirty,
+      }),
     ]),
     safeNote,
     info,
@@ -3997,7 +4196,7 @@ async function start() {
     const Q = QUALITY[APP.quality];
     applyDetail(Math.min(perf.rung, Q.detail), { resize: false });
     gfx.releaseAll();
-    sim = new Sim(gfx, { grid: Q.grid, particles: Q.particles });
+    sim = new Sim(gfx, { grid: WORLD.cells, particles: WORLD.specks });
     renderer = new Renderer(gfx, sim);
     if (!opts.defer) finishBuild();
   };
@@ -4098,6 +4297,8 @@ async function start() {
     loadScene(id) { loadScene(id); },
     setQuality(q) {
       if (!QUALITY[q]) return;
+      WORLD.cells = QUALITY[q].grid;
+      WORLD.specks = QUALITY[q].particles;
       APP.quality = q;
       APP.safe = false;
       perf.auto = true;
@@ -4111,6 +4312,13 @@ async function start() {
     /** A slider was moved by hand, so stop second-guessing it. */
     manualDetail() { perf.auto = false; if (ui) ui.autoDetail(false); },
     get safeMode() { return APP.safe; },
+    /** Room or capacity has changed, and both live in textures, so everything is remade. */
+    rebuildWorld() {
+      WORLD.cells = clamp(Math.round(WORLD.cells / 16) * 16, 32, MAX_CELLS);
+      WORLD.specks = clamp(Math.round(WORLD.specks), 4096, MAX_SPECKS);
+      build();
+      if (ui) ui.refresh();
+    },
     get detailRung() { return perf.rung; },
     get detailCeiling() { return detailCeiling(); },
     get openedAtRung() { return openedAtRung; },
@@ -4202,8 +4410,9 @@ async function start() {
   });
   /** Rebuild the fields, refresh the caustics, pick, and put a frame on screen. */
   function drawOnce(aspect, settled) {
-    sim.buildRenderFields();
-    renderer.updateCaustics(renderer.sceneUniforms());
+    const raster = RENDER.mode === 'raster';
+    sim.buildRenderFields(raster ? { rounds: 1 } : {});
+    if (!raster) renderer.updateCaustics(renderer.sceneUniforms());
     const scene = renderer.sceneUniforms();
     renderer.pickAt(scene, cam, aspect, APP.cursor);
     renderer.draw(scene, cam, aspect, brush, !!settled);
@@ -4301,7 +4510,7 @@ async function start() {
     perf.settle = 2;
   });
   window.PowderToy = {
-    PHYSICS, RENDER, QUALITY, DETAIL, MATERIALS, SCENES, TOOLS, brush, app: APP, controls: ctx,
+    PHYSICS, RENDER, QUALITY, DETAIL, WORLD, MATERIALS, SCENES, TOOLS, brush, app: APP, controls: ctx,
     get sim() { return sim; },
     get renderer() { return renderer; },
     get camera() { return cam; },

@@ -217,7 +217,7 @@ async function start() {
     const Q = QUALITY[APP.quality];
     applyDetail(Math.min(perf.rung, Q.detail), { resize: false });
     gfx.releaseAll();
-    sim = new Sim(gfx, { grid: Q.grid, particles: Q.particles });
+    sim = new Sim(gfx, { grid: WORLD.cells, particles: WORLD.specks });
     renderer = new Renderer(gfx, sim);
     if (!opts.defer) finishBuild();
   };
@@ -337,6 +337,10 @@ async function start() {
     loadScene(id) { loadScene(id); },
     setQuality(q) {
       if (!QUALITY[q]) return;
+      // A preset is a starting point for the two numbers that decide how much sandbox
+      // there is; the sliders move them afterwards without disturbing the preset.
+      WORLD.cells = QUALITY[q].grid;
+      WORLD.specks = QUALITY[q].particles;
       APP.quality = q;
       APP.safe = false;
       perf.auto = true;
@@ -350,6 +354,13 @@ async function start() {
     /** A slider was moved by hand, so stop second-guessing it. */
     manualDetail() { perf.auto = false; if (ui) ui.autoDetail(false); },
     get safeMode() { return APP.safe; },
+    /** Room or capacity has changed, and both live in textures, so everything is remade. */
+    rebuildWorld() {
+      WORLD.cells = clamp(Math.round(WORLD.cells / 16) * 16, 32, MAX_CELLS);
+      WORLD.specks = clamp(Math.round(WORLD.specks), 4096, MAX_SPECKS);
+      build();
+      if (ui) ui.refresh();
+    },
     get detailRung() { return perf.rung; },
     get detailCeiling() { return detailCeiling(); },
     get openedAtRung() { return openedAtRung; },
@@ -457,8 +468,13 @@ async function start() {
 
   /** Rebuild the fields, refresh the caustics, pick, and put a frame on screen. */
   function drawOnce(aspect, settled) {
-    sim.buildRenderFields();
-    renderer.updateCaustics(renderer.sceneUniforms());
+    // Drawing specks needs none of the tracer's preparation. The fields are still built,
+    // because the brush finds what is under the pointer by marching them, but a single
+    // blur is plenty for that - and photons chasing caustics that will never be drawn is
+    // pure waste. Skipping both is most of what makes this mode the fast one.
+    const raster = RENDER.mode === 'raster';
+    sim.buildRenderFields(raster ? { rounds: 1 } : {});
+    if (!raster) renderer.updateCaustics(renderer.sceneUniforms());
     const scene = renderer.sceneUniforms();
     renderer.pickAt(scene, cam, aspect, APP.cursor);
     renderer.draw(scene, cam, aspect, brush, !!settled);
@@ -588,7 +604,7 @@ async function start() {
   // A small hatch for tests, and for anyone who wants to poke at the settings
   // from the browser console.
   window.PowderToy = {
-    PHYSICS, RENDER, QUALITY, DETAIL, MATERIALS, SCENES, TOOLS, brush, app: APP, controls: ctx,
+    PHYSICS, RENDER, QUALITY, DETAIL, WORLD, MATERIALS, SCENES, TOOLS, brush, app: APP, controls: ctx,
     get sim() { return sim; },
     get renderer() { return renderer; },
     get camera() { return cam; },

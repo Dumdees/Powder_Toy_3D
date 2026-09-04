@@ -37,15 +37,38 @@ Heat to chill instead of warm.
 
 MAKING IT BIGGER
 
-Two different things, under the settings (Tab):
+Physics -> How much sandbox:
 
-  Physics -> The box -> How big it is    the same cells spread over more ground,
-                                         so the world grows and detail coarsens.
-                                         Free; change it while it runs.
-  Quality -> Preset                      more cells. Huge and Enormous give real
-                                         room at full detail, and cost a lot more
-                                         to draw - Enormous is about eight times
-                                         the work of Medium.
+  Room                 how many cells across. This is the one that gives you
+                       more space to build in - the solver is a lattice, and
+                       space is measured in cells and nothing else.
+  How much material    how many specks can exist at once, up to 8.4 million.
+                       The figure beside it is what that costs in graphics
+                       memory, so you can see what you are asking for.
+  Scale                how much real space those cells stand for. It changes
+                       how heavy and fast everything looks, not how much room
+                       there is.
+
+Room and material are rebuilt when changed, so the sandbox is emptied. Scale is
+free and changes while it runs.
+
+DRAWING IT FASTER
+
+Quality -> Draw with:
+
+  Traced rays          light is followed through the material - shadows,
+                       refraction, caustics. Slow.
+  Specks               every speck drawn once as a little sphere. No shadows,
+                       nothing seen through water, and a small fraction of the
+                       cost. Good for building something big, or for a machine
+                       that struggles.
+
+IF SOMETHING SMALL WILL NOT SHOW UP
+
+Quality -> How little counts as something. The fields are blurred before they
+are traced, which spreads a small amount of material thin, so a droplet or the
+first dab of a brush can fall below the threshold and be drawn as nothing.
+Lower it and small things appear; raise it and surfaces tighten up.
 
 TAKING THE WALLS AWAY
 

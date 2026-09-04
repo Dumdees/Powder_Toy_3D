@@ -3,8 +3,22 @@
 // and the one-pixel pass that works out what is under the pointer.
 
 const RENDER = {
+  // 'rays' marches through the fields for every pixel - shadows, refraction, caustics,
+  // and expensive. 'raster' draws each speck once as a sphere and lets the depth buffer
+  // sort them out: no light transport at all, and a small fraction of the cost.
+  mode: 'rays',
+  speckSize: 0.55,      // radius of one speck in raster mode, in cells
   scale: 0.75,          // resolution the tracer runs at, relative to the window
   smoothing: 3,         // rounds of blur over the fields before they are traced
+  // The fill fraction at which something counts as a surface. Half was the obvious
+  // choice and the wrong one: the fields are blurred several times before they are
+  // traced, which spreads a small amount of material thin, so anything smaller than a
+  // few cells never reached half anywhere and was simply invisible. A single droplet or
+  // the first dab of a brush should be something you can see.
+  // Measured, not guessed: a forty-speck dab - about a first touch of the brush - peaks
+  // at 0.277 fill after the blurring, so 0.28 left it invisible by three thousandths.
+  // This sits far enough below that to be a real margin rather than a coin toss.
+  iso: 0.20,
   exposure: 0.9,
   bloom: 0.45,
   vignette: 0.32,
@@ -77,6 +91,8 @@ class Renderer {
     this.progPhotonSplat = g.program('photonsplat', PHOTON_SPLAT_FS, PHOTON_SPLAT_VS);
     this.progCausticBlur = g.program('causticblur', CAUSTIC_BLUR_FS);
     this.progPick = g.program('pick', PICK_FS);
+    this.progRasterBg = g.program('rasterbg', RASTER_BG_FS);
+    this.progRaster = g.program('raster', RASTER_FS, RASTER_VS);
   }
 
   #allocVolumes() {
@@ -122,7 +138,9 @@ class Renderer {
     this.hdr = hdr();
     this.history = [hdr(), hdr()];
     this.hi = 0;
-    this.fbHDR = g.framebuffer([this.hdr]);
+    // The raster renderer needs somewhere to sort specks by distance; the tracer never
+    // did, because marching a ray tells it what is in front on the way past.
+    this.fbHDR = g.framebuffer([this.hdr], { depth: true });
     this.fbHistory = this.history.map((t) => g.framebuffer([t]));
     this.sized.push(this.fbHDR, ...this.fbHistory);
     this.bloom = [];
@@ -158,7 +176,7 @@ class Renderer {
       uFA: f[0], uFB: f[1], uFC: f[2], uFD: f[3],
       ...sim.coarseUniforms(),
       uCaustic: RENDER.caustics ? this.caustic[this.ci] : this.zero,
-      uIso: 0.5,
+      uIso: RENDER.iso,
       uDx: sim.dx,
       uClarity: RENDER.clarity,
       uShadowSigma: RENDER.shadowSigma,
@@ -242,18 +260,53 @@ class Renderer {
     return this.pickResult;
   }
 
+  /**
+   * Every speck drawn once as a sphere facing the camera, nearest winning, over a sky
+   * and a ground plane. No rays are traced, so there are no shadows, no reflections and
+   * nothing seen through water - and it costs a small fraction of the tracer.
+   */
+  drawSpecks(scene, cam, aspect) {
+    const g = this.gfx;
+    const cu = this.cameraUniforms(cam, aspect);
+    g.pass(this.fbHDR, this.progRasterBg, {
+      ...scene, ...cu, uRes: [this.width, this.height],
+    });
+    // Cell coordinates throughout, exactly as the tracer works, so the camera the two
+    // renderers are given is the same one and switching does not move the view.
+    const fovY = RENDER.fov * Math.PI / 180;
+    const grid = this.sim.n.nx;
+    const view = mat4LookAt(cam.position, cam.target, [0, 1, 0]);
+    const proj = mat4Perspective(fovY, aspect, 0.1, cam.dist + grid * 6);
+    g.points(this.fbHDR, this.progRaster, {
+      ...this.sim.base,
+      uPos: this.sim.pPos[this.sim.pi], uVel: this.sim.pVel[this.sim.pi], uAux: this.sim.pAux[this.sim.pi],
+      uViewProj: mat4Mul(proj, view),
+      uPointScale: this.height / (2 * Math.tan(fovY * 0.5)),
+      uSpeck: RENDER.speckSize,
+      uCamPos: cam.position, uCamRight: cu.uCamRight, uCamUp: cu.uCamUp, uCamFwd: cu.uCamFwd,
+      uSunDir: scene.uSunDir, uSunColour: scene.uSunColour, uSkyGain: scene.uSkyGain,
+      uGlowGain: RENDER.glowGain,
+    }, Math.max(1, this.sim.used));
+  }
+
   draw(scene, cam, aspect, brush, settled) {
     const g = this.gfx;
-    const jitter = [halton(this.frame + 1, 2) - 0.5, halton(this.frame + 1, 3) - 0.5];
-    g.pass(this.fbHDR, this.progTrace, {
-      ...scene, ...this.cameraUniforms(cam, aspect),
-      uRes: [this.width, this.height],
-      uJitter: jitter,
-      uReflectGain: RENDER.reflectGain,
-    });
+    const raster = RENDER.mode === 'raster';
+    if (raster) {
+      this.drawSpecks(scene, cam, aspect);
+    } else {
+      const jitter = [halton(this.frame + 1, 2) - 0.5, halton(this.frame + 1, 3) - 0.5];
+      g.pass(this.fbHDR, this.progTrace, {
+        ...scene, ...this.cameraUniforms(cam, aspect),
+        uRes: [this.width, this.height],
+        uJitter: jitter,
+        uReflectGain: RENDER.reflectGain,
+      });
+    }
 
     // Temporal accumulation: converge hard when nothing is moving, gently when it is.
-    const blend = !RENDER.accumulate ? 1 : (settled ? Math.max(0.06, 1 / (this.frame + 1)) : 0.42);
+    // The raster picture has no noise in it to average away, so it takes none.
+    const blend = raster || !RENDER.accumulate ? 1 : (settled ? Math.max(0.06, 1 / (this.frame + 1)) : 0.42);
     g.pass(this.fbHistory[1 - this.hi], this.progAccum, {
       uNew: this.hdr, uHistory: this.frame === 0 ? this.hdr : this.history[this.hi], uBlend: this.frame === 0 ? 1 : blend,
     });

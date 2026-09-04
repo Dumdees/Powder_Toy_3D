@@ -123,15 +123,28 @@ function buildUI(ctx) {
       slider(PHYSICS, 'restitution', { label: 'Bounce', min: 0, max: 0.7 }),
       slider(PHYSICS, 'wallFriction', { label: 'Wall grip', min: 0.4, max: 1 }),
     ]),
-    group('The box', [
+    group('How much sandbox', [
+      slider(WORLD, 'cells', {
+        label: 'Room', min: 32, max: MAX_CELLS, step: 16,
+        fmt: (v) => `${v} cells each way`,
+        onChange: () => ctx.rebuildWorld(),
+      }),
+      slider(WORLD, 'specks', {
+        label: 'How much material', min: 1 << 12, max: MAX_SPECKS, step: 4096,
+        fmt: (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : Math.round(v / 1000) + 'k')
+          + ` \u00b7 ${Math.round(v * BYTES_PER_SPECK / 1048576)} MB`,
+        onChange: () => ctx.rebuildWorld(),
+      }),
+      el('p', { class: 'note', text: 'Room is the one that gives you more space to build in. '
+        + 'Both are rebuilt when changed, so the sandbox is emptied.' }),
       el('div', { class: 'row' }, [el('label', { text: 'Walls' }), wallSel]),
       slider(PHYSICS, 'boxMetres', {
-        label: 'How big it is', min: 0.5, max: 20, step: 0.1,
+        label: 'Scale', min: 0.5, max: 20, step: 0.1,
         fmt: (v) => (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' m across',
         onChange: () => { ctx.worldResized(); dirty(); },
       }),
-      el('p', { class: 'note', text: 'Making it bigger spreads the same cells over more ground, '
-        + 'so everything is coarser. For more room at the same detail, pick a larger preset under Quality.' }),
+      el('p', { class: 'note', text: 'Scale is how much real space those cells stand for - '
+        + 'it changes how heavy and fast everything looks, not how much room there is.' }),
     ]),
     el('p', { class: 'note', text: 'Water is held incompressible by a pressure solve; grains yield by Coulomb friction; steam and smoke rise by the Boussinesq term.' }),
   );
@@ -171,6 +184,12 @@ function buildUI(ctx) {
   const viewSel = el('select', { onchange: (e) => { RENDER.view = Number(e.target.value); ctx.resetAccumulation(); } },
     VIEWS.map((name, i) => el('option', { value: i, text: name })));
   const info = el('p', { class: 'note' });
+  const modeSel = el('select', { onchange: (e) => { RENDER.mode = e.target.value; ctx.resetAccumulation(); } }, [
+    el('option', { value: 'rays', text: 'Traced rays - slow, and lit properly' }),
+    el('option', { value: 'raster', text: 'Specks - fast, and flat' }),
+  ]);
+  modeSel.value = RENDER.mode;
+  syncers.push(() => { modeSel.value = RENDER.mode; });
   // Everything below is also driven automatically, so moving one by hand has to stop
   // the sandbox from moving it back a moment later.
   const byHand = () => { ctx.manualDetail(); dirty(); };
@@ -187,6 +206,7 @@ function buildUI(ctx) {
   safeNote.hidden = !ctx.safeMode;
   $('page-quality').append(
     group('Detail', [
+      el('div', { class: 'row' }, [el('label', { text: 'Draw with' }), modeSel]),
       el('div', { class: 'row' }, [el('label', { text: 'Preset' }), presetSel]),
       el('div', { class: 'row' }, [el('label', { text: 'Show' }), viewSel]),
       autoRow,
@@ -198,6 +218,14 @@ function buildUI(ctx) {
       slider(RENDER, 'surfStep', { label: 'Step length', min: 0.2, max: 1.2, fmt: (v) => v.toFixed(2) + ' cells', onChange: dirty }),
       slider(RENDER, 'photons', { label: 'Caustic photons', min: 64, max: 256, step: 32, fmt: (v) => (v * v / 1000).toFixed(0) + 'k', onChange: byHand }),
       slider(RENDER, 'smoothing', { label: 'Surface smoothing', min: 1, max: 4, step: 1, fmt: (v) => String(v), onChange: byHand }),
+      slider(RENDER, 'iso', {
+        label: 'How little counts as something', min: 0.05, max: 0.9, step: 0.01,
+        fmt: (v) => v.toFixed(2), onChange: dirty,
+      }),
+      slider(RENDER, 'speckSize', {
+        label: 'Speck size (drawn as specks)', min: 0.2, max: 2, step: 0.05,
+        fmt: (v) => v.toFixed(2) + ' cells', onChange: dirty,
+      }),
     ]),
     safeNote,
     info,

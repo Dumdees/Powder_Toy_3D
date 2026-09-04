@@ -227,10 +227,21 @@ class Gfx {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, fmt, type, data);
   }
 
-  framebuffer(targets) {
+  /**
+   * `depth` attaches a depth buffer, which only the raster renderer wants: the ray tracer
+   * works out what is in front by marching, so it has never needed one.
+   */
+  framebuffer(targets, { depth = false } = {}) {
     const gl = this.gl;
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    let depthBuf = null;
+    if (depth) {
+      depthBuf = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuf);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, targets[0].w, targets[0].h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthBuf);
+    }
     const bufs = [];
     targets.forEach((t, i) => {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t.tex, 0);
@@ -246,7 +257,7 @@ class Gfx {
       throw new GLError(`Could not set up an off-screen buffer (0x${status.toString(16)}, ${shape}).`);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const rec = { fb, w: targets[0].w, h: targets[0].h, n: targets.length };
+    const rec = { fb, w: targets[0].w, h: targets[0].h, n: targets.length, depth: depthBuf };
     this.owned.add(rec);
     return rec;
   }
@@ -254,6 +265,7 @@ class Gfx {
   /** Delete one texture or framebuffer. */
   free(o) {
     if (!o || !this.owned.has(o)) return;
+    if (o.depth) this.gl.deleteRenderbuffer(o.depth);
     if (o.tex) this.gl.deleteTexture(o.tex); else if (o.fb) this.gl.deleteFramebuffer(o.fb);
     this.owned.delete(o);
   }
@@ -282,6 +294,26 @@ class Gfx {
   }
 
   /** Draw `count` points, additively blended into `target`. Used for scatter passes. */
+  /**
+   * Points that occlude one another, rather than adding up. This is the raster renderer's
+   * one draw: every speck as a little sphere, nearest one winning.
+   */
+  points(target, rec, uniforms, count, { clearColour = null } = {}) {
+    const gl = this.gl;
+    this.bind(target);
+    if (clearColour) {
+      gl.clearColor(clearColour[0], clearColour[1], clearColour[2], clearColour[3]);
+      gl.clearDepth(1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.useProgram(rec.prog);
+    this.setUniforms(rec, uniforms);
+    gl.drawArrays(gl.POINTS, 0, count);
+    gl.disable(gl.DEPTH_TEST);
+  }
+
   scatter(target, rec, uniforms, count, { clear = false } = {}) {
     const gl = this.gl;
     this.bind(target);
